@@ -1,4 +1,6 @@
 import { type InputValue, Regex, type SomeCompanionConfigField } from '@companion-module/base'
+import { FastPollIntervalMs } from './status/poller.js'
+import { DefaultPollGroups, isPollGroupId, type PollGroupId, pollGroupChoices } from './status/groups.js'
 import type { Branded } from './utils/brand.js'
 
 /**
@@ -66,8 +68,62 @@ export function getConfigFields(): SomeCompanionConfigField[] {
 			default: false,
 			width: 6,
 		},
+		{
+			type: 'static-text',
+			id: 'pollInfo',
+			width: 12,
+			label: 'Status polling',
+			value:
+				'Ask the camera for its status regularly and show the answers as variables ' +
+				'(power, pan/tilt, zoom, focus, ...).  Off by default.',
+		},
+		{
+			type: 'checkbox',
+			id: PollEnabledOptionId,
+			label: 'Poll camera status',
+			default: false,
+			width: 4,
+		},
+		{
+			type: 'number',
+			id: PollIntervalOptionId,
+			label: 'Poll interval (ms)',
+			tooltip: `Polls every ${FastPollIntervalMs} ms for 2 s after any camera command, then returns to this interval.`,
+			default: DefaultPollInterval,
+			min: MinPollInterval,
+			max: MaxPollInterval,
+			width: 4,
+		},
+		{
+			type: 'number',
+			id: ZoomMaxOptionId,
+			label: 'Zoom position at full telephoto',
+			tooltip: 'Used to compute the zoom_pct variable.  16384 (0x4000) for most PTZOptics cameras.',
+			default: DefaultZoomMax,
+			min: 1,
+			max: 0xffff,
+			width: 4,
+		},
+		{
+			type: 'multidropdown',
+			id: PollGroupsOptionId,
+			label: 'Status to poll (fewer is faster)',
+			choices: pollGroupChoices(),
+			default: DefaultPollGroups,
+			width: 12,
+		},
 	]
 }
+
+const PollEnabledOptionId = 'pollEnabled'
+const PollIntervalOptionId = 'pollInterval'
+const PollGroupsOptionId = 'pollGroups'
+const ZoomMaxOptionId = 'zoomMax'
+
+const DefaultPollInterval = 1000
+const MinPollInterval = 100
+const MaxPollInterval = 60000
+const DefaultZoomMax = 0x4000
 
 /** Validated config information for the camera connection being manipulated. */
 export type PtzOpticsConfig = {
@@ -83,6 +139,18 @@ export type PtzOpticsConfig = {
 	 * handling state, etc.
 	 */
 	[DebugLoggingOptionId]: boolean
+
+	/** Whether to poll the camera for status and expose it as variables. */
+	[PollEnabledOptionId]: boolean
+
+	/** Milliseconds between status polls when the camera is idle. */
+	[PollIntervalOptionId]: number
+
+	/** Which groups of status inquiries to poll. */
+	[PollGroupsOptionId]: PollGroupId[]
+
+	/** Zoom position at the telephoto end, for computing zoom percentage. */
+	[ZoomMaxOptionId]: number
 }
 
 /**
@@ -95,6 +163,10 @@ export function noCameraConfig(): PtzOpticsConfig {
 		host: '',
 		port: DefaultPort,
 		debugLogging: false,
+		pollEnabled: false,
+		pollInterval: DefaultPollInterval,
+		pollGroups: [...DefaultPollGroups],
+		zoomMax: DefaultZoomMax,
 	}
 }
 
@@ -106,6 +178,30 @@ export function validateConfig(config: RawConfig): asserts config is PtzOpticsCo
 	config.host = toHost(config.host)
 	config.port = toPort(config.port)
 	config[DebugLoggingOptionId] = toDebugLogging(config[DebugLoggingOptionId])
+	config[PollEnabledOptionId] = Boolean(config[PollEnabledOptionId] ?? false)
+	config[PollIntervalOptionId] = toBoundedInteger(
+		config[PollIntervalOptionId],
+		MinPollInterval,
+		MaxPollInterval,
+		DefaultPollInterval,
+	)
+	config[PollGroupsOptionId] = toPollGroups(config[PollGroupsOptionId])
+	config[ZoomMaxOptionId] = toBoundedInteger(config[ZoomMaxOptionId], 1, 0xffff, DefaultZoomMax)
+}
+
+function toBoundedInteger(value: unknown, min: number, max: number, dflt: number): number {
+	const n = Number(value)
+	if (value === undefined || value === null || value === '' || !Number.isFinite(n)) {
+		return dflt
+	}
+	return Math.min(max, Math.max(min, Math.round(n)))
+}
+
+function toPollGroups(value: unknown): PollGroupId[] {
+	if (!Array.isArray(value)) {
+		return [...DefaultPollGroups]
+	}
+	return value.filter(isPollGroupId)
 }
 
 const ipRegExp = new RegExp(Regex.IP.slice(1, -1))

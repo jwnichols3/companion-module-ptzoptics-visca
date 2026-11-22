@@ -10,6 +10,7 @@ import {
 	validateConfig,
 } from './config.js'
 import { getPresets } from './presets/presets.js'
+import { pollVariableDefinitions, StatusPoller } from './status/poller.js'
 import { repr } from './utils/repr.js'
 import type { Command, CommandParameters, CommandParamValues, NoCommandParameters } from './visca/command.js'
 import type { Answer, AnswerParameters, Inquiry } from './visca/inquiry.js'
@@ -26,6 +27,14 @@ export class PtzOpticsInstance extends InstanceBase<RawConfig> {
 
 	/** A port to use to communicate with the represented camera. */
 	#visca = new VISCAPort(this)
+
+	/** Polls the camera for status, if enabled in config. */
+	#poller = new StatusPoller({
+		canPoll: () => !this.#visca.closed,
+		inquire: async (inquiry) => this.#visca.sendInquiry(inquiry).catch((e: Error) => e),
+		setVariableValues: (values) => this.setVariableValues(values),
+		log: (level, message) => this.log(level, message),
+	})
 
 	/**
 	 * Send the given command to the camera, filling in any parameters from the
@@ -48,6 +57,7 @@ export class PtzOpticsInstance extends InstanceBase<RawConfig> {
 		// `sendCommand` implicitly waits for the connection to be fully
 		// established, so it's unnecessary to resolve `this.#visca.connect()`
 		// here.
+		this.#poller.noteActivity()
 		this.#visca.sendCommand(command, ...paramValues).then(
 			(result: void | Error) => {
 				if (typeof result === 'undefined') {
@@ -121,14 +131,21 @@ export class PtzOpticsInstance extends InstanceBase<RawConfig> {
 			this.log('debug', `speed ${speed} unexpectedly not in range [0x01, 0x18]`)
 			this.#speed = 0x0c
 		}
+		this.#publishSpeed()
 	}
 
 	increasePanTiltSpeed(): void {
 		if (this.#speed < 0x18) this.#speed++
+		this.#publishSpeed()
 	}
 
 	decreasePanTiltSpeed(): void {
 		if (this.#speed > 0x01) this.#speed--
+		this.#publishSpeed()
+	}
+
+	#publishSpeed(): void {
+		this.setVariableValues({ pt_speed: this.#speed })
 	}
 
 	override getConfigFields(): SomeCompanionConfigField[] {
@@ -137,6 +154,7 @@ export class PtzOpticsInstance extends InstanceBase<RawConfig> {
 
 	override async destroy(): Promise<void> {
 		this.log('info', `destroying module: ${this.id}`)
+		this.#poller.stop()
 		this.#visca.close('Instance is being destroyed', InstanceStatus.Disconnected)
 	}
 
@@ -156,6 +174,18 @@ export class PtzOpticsInstance extends InstanceBase<RawConfig> {
 
 		validateConfig(config)
 		this.#config = config
+
+		this.setVariableDefinitions([
+			{ variableId: 'pt_speed', name: 'Pan/tilt speed used by movement actions (1-24)' },
+			...(config.pollEnabled ? pollVariableDefinitions(config.pollGroups) : []),
+		])
+		this.#publishSpeed()
+		this.#poller.configure({
+			enabled: config.pollEnabled,
+			interval: config.pollInterval,
+			groups: config.pollGroups,
+			zoomMax: config.zoomMax,
+		})
 
 		if (canUpdateConfigWithoutRestarting(oldConfig, config)) {
 			return

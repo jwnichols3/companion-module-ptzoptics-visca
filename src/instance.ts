@@ -47,6 +47,9 @@ export class PtzOpticsInstance extends InstanceBase<RawConfig, RawSecrets> imple
 		inquire: async (inquiry) => this.#visca.sendInquiry(inquiry).catch((e: Error) => e),
 		setVariableValues: (values) => this.#publishStatus(values),
 		passCompleted: (answered) => {
+			// Feed the preset tracker every pass, not only when values change:
+			// it needs repeated identical readings to know the camera arrived.
+			if (answered) this.#trackPosition()
 			if (answered === this.#statusFresh) return
 			this.#statusFresh = answered
 			this.checkFeedbacks()
@@ -75,26 +78,21 @@ export class PtzOpticsInstance extends InstanceBase<RawConfig, RawSecrets> imple
 
 	/** Publish status values as variables, track the active preset, and update feedbacks. */
 	#publishStatus(values: CompanionVariableValues): void {
-		const out: CompanionVariableValues = { ...values }
 		for (const [k, v] of Object.entries(values)) this.#status.set(k, v)
 
-		if ('pan' in values || 'tilt' in values || 'zoom' in values) {
-			const pan = this.#status.get('pan')
-			const tilt = this.#status.get('tilt')
-			const zoom = this.#status.get('zoom') ?? 0
-			if (
-				typeof pan === 'number' &&
-				typeof tilt === 'number' &&
-				typeof zoom === 'number' &&
-				this.#presetTracker.position({ pan, tilt, zoom }, Date.now())
-			) {
-				this.#status.set('last_preset', '')
-				out['last_preset'] = ''
-			}
-		}
-
-		this.setVariableValues(out)
+		this.setVariableValues(values)
 		this.checkFeedbacks()
+	}
+
+	/** Give the preset tracker the current position; clear the active preset if the camera moved away. */
+	#trackPosition(): void {
+		const pan = this.#status.get('pan')
+		const tilt = this.#status.get('tilt')
+		const zoom = this.#status.get('zoom') ?? 0
+		if (typeof pan !== 'number' || typeof tilt !== 'number' || typeof zoom !== 'number') return
+		if (this.#presetTracker.position({ pan, tilt, zoom }, Date.now())) {
+			this.#publishStatus({ last_preset: '' })
+		}
 	}
 
 	#zoomTarget = new ZoomTarget()

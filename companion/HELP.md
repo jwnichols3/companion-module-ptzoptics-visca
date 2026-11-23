@@ -25,3 +25,11 @@ Turn on **Poll camera status** in the connection settings to have the module ask
 `pt_speed` (the pan/tilt speed movement actions use) is always available. The camera can't report it, so the module publishes its own setting.
 
 If the camera doesn't answer one of these inquiries, the module logs it once and stops asking for that value.
+
+## Status from the camera web interface (optional)
+
+PTZOptics cameras also report status over their web interface, which needs the camera's web login. Turn on **Read status from the camera web interface** and enter a username and password. The password is kept in Companion's secret store. Use a low-privilege account such as `guest`. The module only sends read-only requests and never reads network settings (they contain stream keys).
+
+Variables: `http_status` (ok, login rejected, unreachable), `device_name`, `model`, `firmware`, `moving`, `pt_moving`, `zoom_moving`, `focus_moving`, `autotrack`, `camera_preset`, `video_format`, `ndi_mode`.
+
+`camera_preset` is whatever the camera reports; its meaning varies by firmware (-2 means none).

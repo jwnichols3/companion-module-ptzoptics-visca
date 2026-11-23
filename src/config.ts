@@ -112,7 +112,76 @@ export function getConfigFields(): SomeCompanionConfigField[] {
 			default: DefaultPollGroups,
 			width: 12,
 		},
+		{
+			type: 'static-text',
+			id: 'httpInfo',
+			width: 12,
+			label: 'Camera web login (optional)',
+			value:
+				"With the camera's web login, the module also reads whether the camera is moving, " +
+				'auto-tracking, the reported preset, device name and firmware.  It only reads; it never ' +
+				"changes camera settings over the web interface.  Use a low-privilege (e.g. 'guest') account.",
+		},
+		{
+			type: 'checkbox',
+			id: HttpEnabledOptionId,
+			label: 'Read status from the camera web interface',
+			default: false,
+			width: 4,
+		},
+		{
+			type: 'textinput',
+			id: HttpUserOptionId,
+			label: 'Web username',
+			default: 'guest',
+			width: 4,
+		},
+		{
+			type: 'secret-text',
+			id: HttpPasswordSecretId,
+			label: 'Web password',
+			default: '',
+			width: 4,
+		},
+		{
+			type: 'number',
+			id: HttpPortOptionId,
+			label: 'Web port',
+			default: DefaultHttpPort,
+			min: 1,
+			max: 65535,
+			width: 4,
+		},
+		{
+			type: 'number',
+			id: HttpIntervalOptionId,
+			label: 'Web poll interval (ms)',
+			default: DefaultHttpInterval,
+			min: MinHttpInterval,
+			max: MaxPollInterval,
+			width: 4,
+		},
 	]
+}
+
+const HttpEnabledOptionId = 'httpEnabled'
+const HttpUserOptionId = 'httpUser'
+const HttpPortOptionId = 'httpPort'
+const HttpIntervalOptionId = 'httpInterval'
+const HttpPasswordSecretId = 'httpPassword'
+const DefaultHttpPort = 80
+const DefaultHttpInterval = 1000
+const MinHttpInterval = 250
+
+/** Secret config values, kept in Companion's secret store. */
+export interface RawSecrets {
+	[key: string]: InputValue | undefined
+}
+
+/** The camera web password from secrets, or '' if unset. */
+export function httpPassword(secrets: RawSecrets | undefined): string {
+	const v = secrets?.[HttpPasswordSecretId]
+	return typeof v === 'string' ? v : ''
 }
 
 const PollEnabledOptionId = 'pollEnabled'
@@ -151,6 +220,12 @@ export type PtzOpticsConfig = {
 
 	/** Zoom position at the telephoto end, for computing zoom percentage. */
 	[ZoomMaxOptionId]: number
+
+	/** Whether to read status from the camera's web interface. */
+	[HttpEnabledOptionId]: boolean
+	[HttpUserOptionId]: string
+	[HttpPortOptionId]: number
+	[HttpIntervalOptionId]: number
 }
 
 /**
@@ -167,6 +242,10 @@ export function noCameraConfig(): PtzOpticsConfig {
 		pollInterval: DefaultPollInterval,
 		pollGroups: [...DefaultPollGroups],
 		zoomMax: DefaultZoomMax,
+		httpEnabled: false,
+		httpUser: 'guest',
+		httpPort: DefaultHttpPort,
+		httpInterval: DefaultHttpInterval,
 	}
 }
 
@@ -187,6 +266,15 @@ export function validateConfig(config: RawConfig): asserts config is PtzOpticsCo
 	)
 	config[PollGroupsOptionId] = toPollGroups(config[PollGroupsOptionId])
 	config[ZoomMaxOptionId] = toBoundedInteger(config[ZoomMaxOptionId], 1, 0xffff, DefaultZoomMax)
+	config[HttpEnabledOptionId] = Boolean(config[HttpEnabledOptionId] ?? false)
+	config[HttpUserOptionId] = String(config[HttpUserOptionId] ?? 'guest')
+	config[HttpPortOptionId] = toBoundedInteger(config[HttpPortOptionId], 1, 65535, DefaultHttpPort)
+	config[HttpIntervalOptionId] = toBoundedInteger(
+		config[HttpIntervalOptionId],
+		MinHttpInterval,
+		MaxPollInterval,
+		DefaultHttpInterval,
+	)
 }
 
 function toBoundedInteger(value: unknown, min: number, max: number, dflt: number): number {

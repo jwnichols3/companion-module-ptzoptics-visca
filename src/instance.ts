@@ -4,11 +4,14 @@ import {
 	canUpdateConfigWithoutRestarting,
 	type RawConfig,
 	getConfigFields,
+	httpPassword,
 	isValidHost,
 	noCameraConfig,
 	type PtzOpticsConfig,
+	type RawSecrets,
 	validateConfig,
 } from './config.js'
+import { HttpStatusPoller, HttpVariables } from './http/http-status.js'
 import { getPresets } from './presets/presets.js'
 import { pollVariableDefinitions, StatusPoller } from './status/poller.js'
 import { repr } from './utils/repr.js'
@@ -16,7 +19,7 @@ import type { Command, CommandParameters, CommandParamValues, NoCommandParameter
 import type { Answer, AnswerParameters, Inquiry } from './visca/inquiry.js'
 import { VISCAPort } from './visca/port.js'
 
-export class PtzOpticsInstance extends InstanceBase<RawConfig> {
+export class PtzOpticsInstance extends InstanceBase<RawConfig, RawSecrets> {
 	/** Configuration dictating the behavior of this instance. */
 	#config: PtzOpticsConfig = noCameraConfig()
 
@@ -32,6 +35,12 @@ export class PtzOpticsInstance extends InstanceBase<RawConfig> {
 	#poller = new StatusPoller({
 		canPoll: () => !this.#visca.closed,
 		inquire: async (inquiry) => this.#visca.sendInquiry(inquiry).catch((e: Error) => e),
+		setVariableValues: (values) => this.setVariableValues(values),
+		log: (level, message) => this.log(level, message),
+	})
+
+	/** Reads status from the camera's web interface, if enabled in config. */
+	#httpPoller = new HttpStatusPoller({
 		setVariableValues: (values) => this.setVariableValues(values),
 		log: (level, message) => this.log(level, message),
 	})
@@ -155,19 +164,20 @@ export class PtzOpticsInstance extends InstanceBase<RawConfig> {
 	override async destroy(): Promise<void> {
 		this.log('info', `destroying module: ${this.id}`)
 		this.#poller.stop()
+		this.#httpPoller.stop()
 		this.#visca.close('Instance is being destroyed', InstanceStatus.Disconnected)
 	}
 
-	override async init(config: RawConfig): Promise<void> {
+	override async init(config: RawConfig, _isFirstInit: boolean, secrets: RawSecrets): Promise<void> {
 		this.#logConfig(config, 'init()')
 
 		this.setActionDefinitions(getActions(this))
 		this.setPresetDefinitions(getPresets())
 
-		return this.configUpdated(config)
+		return this.configUpdated(config, secrets)
 	}
 
-	override async configUpdated(config: RawConfig): Promise<void> {
+	override async configUpdated(config: RawConfig, secrets: RawSecrets): Promise<void> {
 		this.#logConfig(config, 'configUpdated()')
 
 		const oldConfig = this.#config
@@ -178,6 +188,7 @@ export class PtzOpticsInstance extends InstanceBase<RawConfig> {
 		this.setVariableDefinitions([
 			{ variableId: 'pt_speed', name: 'Pan/tilt speed used by movement actions (1-24)' },
 			...(config.pollEnabled ? pollVariableDefinitions(config.pollGroups) : []),
+			...(config.httpEnabled ? HttpVariables : []),
 		])
 		this.#publishSpeed()
 		this.#poller.configure({
@@ -185,6 +196,14 @@ export class PtzOpticsInstance extends InstanceBase<RawConfig> {
 			interval: config.pollInterval,
 			groups: config.pollGroups,
 			zoomMax: config.zoomMax,
+		})
+		this.#httpPoller.configure({
+			enabled: config.httpEnabled && isValidHost(config.host),
+			host: config.host,
+			port: config.httpPort,
+			username: config.httpUser,
+			password: httpPassword(secrets),
+			interval: config.httpInterval,
 		})
 
 		if (canUpdateConfigWithoutRestarting(oldConfig, config)) {

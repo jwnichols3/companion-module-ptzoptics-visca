@@ -6,12 +6,15 @@ import type {
 } from '@companion-module/base'
 import { tryUpdateCustomCommandsWithCommandParamOptions } from './actions/custom-command.js'
 import { tryUpdatePresetAndSpeedEncodingsInActions, tryUpdateRecallSetPresetActions } from './actions/presets.js'
-import { type RawConfig, tryUpdateConfigWithDebugLogging } from './config.js'
+import { type RawConfig, type RawSecrets, tryUpdateConfigWithDebugLogging } from './config.js'
 
 function ActionUpdater(
 	tryUpdate: (action: CompanionMigrationAction) => boolean,
-): CompanionStaticUpgradeScript<RawConfig> {
-	return (_context: CompanionUpgradeContext<RawConfig>, props: CompanionStaticUpgradeProps<RawConfig>) => {
+): CompanionStaticUpgradeScript<RawConfig, RawSecrets | undefined> {
+	return (
+		_context: CompanionUpgradeContext<RawConfig>,
+		props: CompanionStaticUpgradeProps<RawConfig, RawSecrets | undefined>,
+	) => {
 		return {
 			updatedActions: props.actions.filter(tryUpdate),
 			updatedConfig: null,
@@ -20,8 +23,13 @@ function ActionUpdater(
 	}
 }
 
-function ConfigUpdater(tryUpdate: (config: RawConfig) => boolean): CompanionStaticUpgradeScript<RawConfig> {
-	return (_context: CompanionUpgradeContext<RawConfig>, props: CompanionStaticUpgradeProps<RawConfig>) => {
+function ConfigUpdater(
+	tryUpdate: (config: RawConfig) => boolean,
+): CompanionStaticUpgradeScript<RawConfig, RawSecrets | undefined> {
+	return (
+		_context: CompanionUpgradeContext<RawConfig>,
+		props: CompanionStaticUpgradeProps<RawConfig, RawSecrets | undefined>,
+	) => {
 		return {
 			updatedActions: [],
 			updatedConfig: props.config !== null && tryUpdate(props.config) ? props.config : null,
@@ -35,4 +43,4 @@ export const UpgradeScripts = [
 	ConfigUpdater(tryUpdateConfigWithDebugLogging),
 	ActionUpdater(tryUpdateRecallSetPresetActions),
 	ActionUpdater(tryUpdatePresetAndSpeedEncodingsInActions),
-] satisfies CompanionStaticUpgradeScript<RawConfig>[]
+] satisfies CompanionStaticUpgradeScript<RawConfig, RawSecrets | undefined>[]

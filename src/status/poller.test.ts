@@ -25,6 +25,16 @@ const RealAnswers: Record<string, Answer<AnswerParameters>> = {
 	'[81 09 04 44 FF]': { p: 0x80 },
 	'[81 09 04 66 FF]': { p: 0x3 },
 	'[81 09 04 61 FF]': { p: 0x3 },
+	// Color and picture, read 2026-11-22
+	'[81 09 04 20 FF]': { p: 0x28 }, // 90 50 28 FF: 6500K
+	'[81 09 04 12 FF]': { p: 0x0d },
+	'[81 09 04 13 FF]': { p: 0x0b },
+	'[81 09 04 49 FF]': { p: 0x04 },
+	'[81 09 04 4F FF]': { p: 0x07 },
+	'[81 09 04 A2 FF]': { p: 0x07 },
+	'[81 09 04 A1 FF]': { p: 0x07 },
+	'[81 09 04 42 FF]': { p: 0x04 },
+	'[81 09 04 4E FF]': { p: 0x06 },
 }
 
 class FakeTarget implements PollTarget {
@@ -94,8 +104,32 @@ describe('status poller', () => {
 				wb_blue: 0x80,
 				flip: 'off',
 				mirror: 'off',
+				color_temp: 40,
+				color_temp_label: '6500K',
+				r_tuning: 13,
+				r_tuning_label: '+3',
+				b_tuning: 11,
+				b_tuning_label: '+1',
+				saturation: 4,
+				saturation_label: '100%',
+				hue: 7,
+				hue_label: '0°',
+				contrast: 7,
+				contrast_label: '0',
+				luminance: 7,
+				luminance_label: '0',
+				sharpness: 4,
+				sharpness_label: '4',
+				exp_comp: 6,
+				exp_comp_label: '-1',
 			},
 		])
+	})
+
+	test('reads color temperature white balance mode', async () => {
+		const target = new FakeTarget({ ...RealAnswers, '[81 09 04 35 FF]': { p: 0x20 } })
+		await poller(target, [PollGroupId.WhiteBalance]).pollOnce()
+		expect(target.values[0]?.['wb_mode']).toBe('color-temp')
 	})
 
 	test('publishes only changed values', async () => {

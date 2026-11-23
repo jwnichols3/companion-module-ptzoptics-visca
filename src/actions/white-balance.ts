@@ -28,6 +28,7 @@ const [getWhiteBalanceMode] = optionNullConversions<WhiteBalanceMode, typeof Whi
 		WhiteBalanceMode.Outdoor,
 		WhiteBalanceMode.OnePush,
 		WhiteBalanceMode.Manual,
+		WhiteBalanceMode.ColorTemperature,
 	],
 	WhiteBalanceMode.Automatic,
 )
@@ -63,6 +64,7 @@ export function whiteBalanceActions(instance: PtzOpticsInstance): ActionDefiniti
 						{ id: 'outdoor', label: 'Outdoor' },
 						{ id: 'onepush', label: 'One Push' },
 						{ id: 'manual', label: 'Manual' },
+						{ id: 'colortemp', label: 'Color temperature (VAR)' },
 					],
 					default: 'automatic',
 				},

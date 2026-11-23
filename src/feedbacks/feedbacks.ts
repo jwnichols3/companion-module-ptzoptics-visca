@@ -1,4 +1,5 @@
 import type { CompanionFeedbackDefinitions, CompanionVariableValue, DropdownChoice } from '@companion-module/base'
+import { ImageSettings, imageSetting } from '../camera/image.js'
 import { Amber, Black, Green, Grey, LightGrey, Red, White } from '../utils/colors.js'
 
 /** Read-only access to the latest status the module knows. */
@@ -20,6 +21,7 @@ export const FeedbackId = {
 	AutoTracking: 'statusAutoTracking',
 	LastPreset: 'statusLastPreset',
 	Stale: 'statusStale',
+	ImageOffDefault: 'statusImageOffDefault',
 } as const
 
 const exposureModes: DropdownChoice[] = [
@@ -36,6 +38,7 @@ const whiteBalanceModes: DropdownChoice[] = [
 	{ id: 'outdoor', label: 'Outdoor' },
 	{ id: 'one-push', label: 'One push' },
 	{ id: 'manual', label: 'Manual' },
+	{ id: 'color-temp', label: 'Color temperature (VAR)' },
 ]
 
 const comparisons: DropdownChoice[] = [
@@ -193,6 +196,27 @@ export function getFeedbacks(src: StatusSource): CompanionFeedbackDefinitions {
 			defaultStyle: { bgcolor: Grey, color: LightGrey },
 			options: [],
 			callback: () => !src.statusFresh,
+		},
+		[FeedbackId.ImageOffDefault]: {
+			type: 'boolean',
+			name: 'Image: setting differs from its default',
+			description: needsPolling + ' (Color and picture group, or White balance for red/blue gain)',
+			defaultStyle: { bgcolor: Amber, color: Black },
+			options: [
+				{
+					type: 'dropdown',
+					id: 'setting',
+					label: 'Setting',
+					choices: ImageSettings.map(({ id, label }) => ({ id, label })),
+					default: 'redTuning',
+				},
+			],
+			callback: ({ options }) => {
+				const setting = imageSetting(options['setting'])
+				if (setting === undefined) return false
+				const v = src.statusValue(setting.variable)
+				return typeof v === 'number' && v !== setting.center
+			},
 		},
 	}
 }

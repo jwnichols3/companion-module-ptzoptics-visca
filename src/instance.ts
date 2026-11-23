@@ -24,6 +24,9 @@ import { pollVariableDefinitions, StatusPoller } from './status/poller.js'
 import { PresetTracker } from './status/preset-tracker.js'
 import { ZoomTarget } from './status/zoom-target.js'
 import { ZoomDirect } from './camera/zoom.js'
+import { imageSetting } from './camera/image.js'
+import { WhiteBalance } from './camera/white-balance.js'
+import { ValueTargets } from './status/value-target.js'
 import { repr } from './utils/repr.js'
 import type { Command, CommandParameters, CommandParamValues, NoCommandParameters } from './visca/command.js'
 import type { Answer, AnswerParameters, Inquiry } from './visca/inquiry.js'
@@ -116,6 +119,46 @@ export class PtzOpticsInstance extends InstanceBase<RawConfig, RawSecrets> imple
 	/** Zoom to an absolute percentage of the zoom range. */
 	zoomToPercent(percent: number): void {
 		this.sendCommand(ZoomDirect, { position: this.#zoomTarget.toPercent(percent, this.#config.zoomMax, Date.now()) })
+	}
+
+	#imageTargets = new ValueTargets()
+
+	/**
+	 * Change a color or picture setting: step it from its current value, set
+	 * it, or reset it.  Publishes the new value right away so knob displays
+	 * keep up; the next poll confirms it.
+	 */
+	imageAdjust(
+		id: string,
+		change: { delta: number } | { value: number } | { reset: true },
+		setWhiteBalance: boolean,
+	): void {
+		const setting = imageSetting(id)
+		if (setting === undefined) {
+			this.log('warn', `Unknown image setting: ${id}`)
+			return
+		}
+		const { min, max, variable } = setting
+		const now = Date.now()
+		let value: number | null
+		if ('delta' in change) {
+			const polled = this.#status.get(variable)
+			value = this.#imageTargets.step(id, change.delta, typeof polled === 'number' ? polled : undefined, min, max, now)
+			if (value === null) {
+				this.log('warn', `${setting.label} step needs status polling with its group on`)
+				return
+			}
+		} else {
+			value = this.#imageTargets.set(id, 'value' in change ? change.value : setting.center, min, max, now)
+		}
+
+		const needs = setting.needsWhiteBalance
+		if (setWhiteBalance && needs !== undefined && this.#status.get('wb_mode') !== needs) {
+			this.sendCommand(WhiteBalance, { mode: needs === 'color-temp' ? 'colortemp' : 'manual' })
+			this.#publishStatus({ wb_mode: needs })
+		}
+		this.sendCommand(setting.command, { value })
+		this.#publishStatus({ [variable]: value, [`${variable}_label`]: setting.display(value) })
 	}
 
 	/** Note that a preset was recalled, for the "last recalled preset" feedback. */

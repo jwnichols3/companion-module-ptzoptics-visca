@@ -1,4 +1,5 @@
 import type { CompanionVariableDefinition, CompanionVariableValues, DropdownChoice } from '@companion-module/base'
+import { ImageSettings } from '../camera/image.js'
 import { type Answer, type AnswerParameters, type Inquiry, UserDefinedInquiry } from '../visca/inquiry.js'
 
 /**
@@ -38,6 +39,7 @@ export const PollGroupId = {
 	Exposure: 'exposure',
 	WhiteBalance: 'white-balance',
 	Image: 'image',
+	Picture: 'picture',
 } as const
 
 export type PollGroupId = (typeof PollGroupId)[keyof typeof PollGroupId]
@@ -50,6 +52,11 @@ function signed16(v: number): number {
 /** Answer `90 50 0p FF`, one nibble parameter. */
 function oneNibble(bytes: number[]): UserDefinedInquiry<{ p: { nibbles: [5] } }> {
 	return new UserDefinedInquiry(bytes, { bytes: [0x90, 0x50, 0x00, 0xff], params: { p: { nibbles: [5] } } })
+}
+
+/** Answer `90 50 pq FF`, one whole-byte parameter. */
+function oneByte(bytes: number[]): UserDefinedInquiry<{ p: { nibbles: [4, 5] } }> {
+	return new UserDefinedInquiry(bytes, { bytes: [0x90, 0x50, 0x00, 0xff], params: { p: { nibbles: [4, 5] } } })
 }
 
 /** Answer `90 50 0p 0q 0r 0s FF`, one 16-bit parameter. */
@@ -91,9 +98,10 @@ const WhiteBalanceModes: Record<number, string> = {
 	0x2: 'outdoor',
 	0x3: 'one-push',
 	0x5: 'manual',
+	0x20: 'color-temp',
 }
 
-export const PollGroups: readonly PollGroup[] = [
+export const PollGroups: PollGroup[] = [
 	{
 		id: PollGroupId.Power,
 		label: 'Power',
@@ -190,10 +198,15 @@ export const PollGroups: readonly PollGroup[] = [
 		inquiries: [
 			{
 				id: 'wb-mode',
-				inquiry: oneNibble([0x81, 0x09, 0x04, 0x35, 0xff]),
+				// Color temperature mode answers 90 50 20 FF, so read the whole byte.
+				inquiry: oneByte([0x81, 0x09, 0x04, 0x35, 0xff]),
 				toValues: ({ p }) => ({ wb_mode: lookup(WhiteBalanceModes, p) }),
 			},
-			{ id: 'wb-red', inquiry: twoLowNibbles([0x81, 0x09, 0x04, 0x43, 0xff]), toValues: ({ p }) => ({ wb_red: p }) },
+			{
+				id: 'wb-red',
+				inquiry: twoLowNibbles([0x81, 0x09, 0x04, 0x43, 0xff]),
+				toValues: ({ p }) => ({ wb_red: p }),
+			},
 			{
 				id: 'wb-blue',
 				inquiry: twoLowNibbles([0x81, 0x09, 0x04, 0x44, 0xff]),
@@ -201,7 +214,7 @@ export const PollGroups: readonly PollGroup[] = [
 			},
 		],
 		variables: [
-			{ variableId: 'wb_mode', name: 'White balance mode' },
+			{ variableId: 'wb_mode', name: 'White balance mode (auto, indoor, outdoor, one-push, manual, color-temp)' },
 			{ variableId: 'wb_red', name: 'White balance red gain (raw)' },
 			{ variableId: 'wb_blue', name: 'White balance blue gain (raw)' },
 		],
@@ -223,6 +236,28 @@ export const PollGroups: readonly PollGroup[] = [
 		],
 	},
 ]
+
+const PictureSettings = ImageSettings.filter((s) => s.variable !== 'wb_red' && s.variable !== 'wb_blue')
+
+PollGroups.push({
+	id: PollGroupId.Picture,
+	label: 'Color and picture (color temp, tuning, saturation, hue, contrast, brightness, sharpness, exp comp)',
+	inquiries: PictureSettings.map((s) => {
+		const bytes = [0x81, 0x09, ...s.inquiry, 0xff]
+		return {
+			id: s.variable,
+			inquiry: s.byteAnswer === true ? oneByte(bytes) : twoLowNibbles(bytes),
+			toValues: ({ p }: Answer<AnswerParameters>) => ({
+				[s.variable]: p,
+				[`${s.variable}_label`]: s.display(Number(p)),
+			}),
+		}
+	}),
+	variables: PictureSettings.flatMap((s) => [
+		{ variableId: s.variable, name: `${s.label} (raw ${s.min}-${s.max})` },
+		{ variableId: `${s.variable}_label`, name: `${s.label} (display)` },
+	]),
+})
 
 export const DefaultPollGroups: PollGroupId[] = [PollGroupId.Power, PollGroupId.Position, PollGroupId.Lens]
 

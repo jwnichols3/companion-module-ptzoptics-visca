@@ -7,13 +7,14 @@ export const WhiteBalanceMode = {
 	Outdoor: 'outdoor',
 	OnePush: 'onepush',
 	Manual: 'manual',
+	ColorTemperature: 'colortemp',
 } as const
 
 export type WhiteBalanceMode = (typeof WhiteBalanceMode)[keyof typeof WhiteBalanceMode]
 
 export const WhiteBalance = new ModuleDefinedCommand([0x81, 0x01, 0x04, 0x35, 0x00, 0xff], {
 	mode: {
-		nibbles: [9],
+		nibbles: [8, 9],
 		convert: (mode: WhiteBalanceMode): number => {
 			switch (mode) {
 				// @ts-expect-error intentional fallthrough
@@ -31,6 +32,8 @@ export const WhiteBalance = new ModuleDefinedCommand([0x81, 0x01, 0x04, 0x35, 0x
 					return 0x3
 				case 'manual':
 					return 0x5
+				case 'colortemp':
+					return 0x20
 			}
 		},
 	},

@@ -3,6 +3,7 @@ import { autoTrackingActions } from './auto-tracking.js'
 import { customCommandActions } from './custom-command.js'
 import { exposureActions } from './exposure.js'
 import { focusActions } from './focus.js'
+import { imageActions } from './image.js'
 import type { PtzOpticsInstance } from '../instance.js'
 import { osdActions } from './osd.js'
 import { panTiltActions } from './pan-tilt.js'
@@ -17,6 +18,7 @@ export function getActions(instance: PtzOpticsInstance): ActionDefinitions<PtzOp
 		...customCommandActions(instance),
 		...exposureActions(instance),
 		...focusActions(instance),
+		...imageActions(instance),
 		...osdActions(instance),
 		...panTiltActions(instance),
 		...powerActions(instance),

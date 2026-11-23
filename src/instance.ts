@@ -1,4 +1,10 @@
-import { InstanceBase, InstanceStatus, type SomeCompanionConfigField } from '@companion-module/base'
+import {
+	type CompanionVariableValue,
+	type CompanionVariableValues,
+	InstanceBase,
+	InstanceStatus,
+	type SomeCompanionConfigField,
+} from '@companion-module/base'
 import { getActions } from './actions/actions.js'
 import {
 	canUpdateConfigWithoutRestarting,
@@ -11,15 +17,19 @@ import {
 	type RawSecrets,
 	validateConfig,
 } from './config.js'
+import { getFeedbacks, type StatusSource } from './feedbacks/feedbacks.js'
 import { HttpStatusPoller, HttpVariables } from './http/http-status.js'
 import { getPresets } from './presets/presets.js'
 import { pollVariableDefinitions, StatusPoller } from './status/poller.js'
+import { PresetTracker } from './status/preset-tracker.js'
+import { ZoomTarget } from './status/zoom-target.js'
+import { ZoomDirect } from './camera/zoom.js'
 import { repr } from './utils/repr.js'
 import type { Command, CommandParameters, CommandParamValues, NoCommandParameters } from './visca/command.js'
 import type { Answer, AnswerParameters, Inquiry } from './visca/inquiry.js'
 import { VISCAPort } from './visca/port.js'
 
-export class PtzOpticsInstance extends InstanceBase<RawConfig, RawSecrets> {
+export class PtzOpticsInstance extends InstanceBase<RawConfig, RawSecrets> implements StatusSource {
 	/** Configuration dictating the behavior of this instance. */
 	#config: PtzOpticsConfig = noCameraConfig()
 
@@ -35,15 +45,86 @@ export class PtzOpticsInstance extends InstanceBase<RawConfig, RawSecrets> {
 	#poller = new StatusPoller({
 		canPoll: () => !this.#visca.closed,
 		inquire: async (inquiry) => this.#visca.sendInquiry(inquiry).catch((e: Error) => e),
-		setVariableValues: (values) => this.setVariableValues(values),
+		setVariableValues: (values) => this.#publishStatus(values),
+		passCompleted: (answered) => {
+			if (answered === this.#statusFresh) return
+			this.#statusFresh = answered
+			this.checkFeedbacks()
+		},
 		log: (level, message) => this.log(level, message),
 	})
 
 	/** Reads status from the camera's web interface, if enabled in config. */
 	#httpPoller = new HttpStatusPoller({
-		setVariableValues: (values) => this.setVariableValues(values),
+		setVariableValues: (values) => this.#publishStatus(values),
 		log: (level, message) => this.log(level, message),
 	})
+
+	/** The latest value of every status variable this module publishes. */
+	#status = new Map<string, CompanionVariableValue | undefined>()
+	#statusFresh = true
+	#presetTracker = new PresetTracker()
+
+	statusValue(id: string): CompanionVariableValue | undefined {
+		return this.#status.get(id)
+	}
+
+	get statusFresh(): boolean {
+		return this.#statusFresh
+	}
+
+	/** Publish status values as variables, track the active preset, and update feedbacks. */
+	#publishStatus(values: CompanionVariableValues): void {
+		const out: CompanionVariableValues = { ...values }
+		for (const [k, v] of Object.entries(values)) this.#status.set(k, v)
+
+		if ('pan' in values || 'tilt' in values || 'zoom' in values) {
+			const pan = this.#status.get('pan')
+			const tilt = this.#status.get('tilt')
+			const zoom = this.#status.get('zoom') ?? 0
+			if (
+				typeof pan === 'number' &&
+				typeof tilt === 'number' &&
+				typeof zoom === 'number' &&
+				this.#presetTracker.position({ pan, tilt, zoom }, Date.now())
+			) {
+				this.#status.set('last_preset', '')
+				out['last_preset'] = ''
+			}
+		}
+
+		this.setVariableValues(out)
+		this.checkFeedbacks()
+	}
+
+	#zoomTarget = new ZoomTarget()
+
+	/** Zoom by a signed percentage of the zoom range from the current position. */
+	zoomStep(percent: number): void {
+		const zoom = this.#status.get('zoom')
+		const position = this.#zoomTarget.step(
+			percent,
+			typeof zoom === 'number' ? zoom : undefined,
+			this.#config.zoomMax,
+			Date.now(),
+		)
+		if (position === null) {
+			this.log('warn', 'Zoom step needs status polling with "Zoom and focus" on')
+			return
+		}
+		this.sendCommand(ZoomDirect, { position })
+	}
+
+	/** Zoom to an absolute percentage of the zoom range. */
+	zoomToPercent(percent: number): void {
+		this.sendCommand(ZoomDirect, { position: this.#zoomTarget.toPercent(percent, this.#config.zoomMax, Date.now()) })
+	}
+
+	/** Note that a preset was recalled, for the "last recalled preset" feedback. */
+	notePresetRecalled(preset: number): void {
+		this.#presetTracker.recalled(preset, Date.now())
+		this.#publishStatus({ last_preset: preset })
+	}
 
 	/**
 	 * Send the given command to the camera, filling in any parameters from the
@@ -154,7 +235,7 @@ export class PtzOpticsInstance extends InstanceBase<RawConfig, RawSecrets> {
 	}
 
 	#publishSpeed(): void {
-		this.setVariableValues({ pt_speed: this.#speed })
+		this.#publishStatus({ pt_speed: this.#speed })
 	}
 
 	override getConfigFields(): SomeCompanionConfigField[] {
@@ -172,6 +253,7 @@ export class PtzOpticsInstance extends InstanceBase<RawConfig, RawSecrets> {
 		this.#logConfig(config, 'init()')
 
 		this.setActionDefinitions(getActions(this))
+		this.setFeedbackDefinitions(getFeedbacks(this))
 		this.setPresetDefinitions(getPresets())
 
 		return this.configUpdated(config, secrets)
@@ -185,8 +267,14 @@ export class PtzOpticsInstance extends InstanceBase<RawConfig, RawSecrets> {
 		validateConfig(config)
 		this.#config = config
 
+		this.#status.clear()
+		this.#statusFresh = true
 		this.setVariableDefinitions([
 			{ variableId: 'pt_speed', name: 'Pan/tilt speed used by movement actions (1-24)' },
+			{
+				variableId: 'last_preset',
+				name: 'Preset last recalled by this module, until the camera moves away (blank if none)',
+			},
 			...(config.pollEnabled ? pollVariableDefinitions(config.pollGroups) : []),
 			...(config.httpEnabled ? HttpVariables : []),
 		])

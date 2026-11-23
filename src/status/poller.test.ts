@@ -51,6 +51,11 @@ class FakeTarget implements PollTarget {
 		this.values.push(values)
 	}
 
+	passes: boolean[] = []
+	passCompleted(answered: boolean): void {
+		this.passes.push(answered)
+	}
+
 	log(_level: string, message: string): void {
 		this.logs.push(message)
 	}

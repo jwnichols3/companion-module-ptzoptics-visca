@@ -1,5 +1,6 @@
 import type { CompanionPresetDefinitions } from '@companion-module/base'
 import { WhiteBalanceActionId, WhiteBalanceModeId } from '../actions/white-balance.js'
+import { FeedbackId } from '../feedbacks/feedbacks.js'
 import { Black, White } from '../utils/colors.js'
 
 export function whiteBalancePresets(): CompanionPresetDefinitions {
@@ -27,7 +28,7 @@ export function whiteBalancePresets(): CompanionPresetDefinitions {
 					up: [],
 				},
 			],
-			feedbacks: [],
+			feedbacks: [{ feedbackId: FeedbackId.WhiteBalanceMode, options: { mode: 'auto' } }],
 		},
 
 		indoor_white_balance_preset: {
@@ -53,7 +54,7 @@ export function whiteBalancePresets(): CompanionPresetDefinitions {
 					up: [],
 				},
 			],
-			feedbacks: [],
+			feedbacks: [{ feedbackId: FeedbackId.WhiteBalanceMode, options: { mode: 'indoor' } }],
 		},
 
 		outdoor_white_balance_preset: {
@@ -79,7 +80,7 @@ export function whiteBalancePresets(): CompanionPresetDefinitions {
 					up: [],
 				},
 			],
-			feedbacks: [],
+			feedbacks: [{ feedbackId: FeedbackId.WhiteBalanceMode, options: { mode: 'outdoor' } }],
 		},
 
 		one_push_white_balance_preset: {
@@ -105,7 +106,7 @@ export function whiteBalancePresets(): CompanionPresetDefinitions {
 					up: [],
 				},
 			],
-			feedbacks: [],
+			feedbacks: [{ feedbackId: FeedbackId.WhiteBalanceMode, options: { mode: 'one-push' } }],
 		},
 
 		trigger_one_push_white_balance_preset: {

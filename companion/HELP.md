@@ -33,3 +33,19 @@ PTZOptics cameras also report status over their web interface, which needs the c
 Variables: `http_status` (ok, login rejected, unreachable), `device_name`, `model`, `firmware`, `moving`, `pt_moving`, `zoom_moving`, `focus_moving`, `autotrack`, `camera_preset`, `video_format`, `ndi_mode`.
 
 `camera_preset` is whatever the camera reports; its meaning varies by firmware (-2 means none).
+
+## Feedbacks
+
+Feedbacks read the status above, so turn on the matching polling first.
+
+- **Camera: power is on**, **Lens: focus mode is**, **Exposure: mode is**, **White balance: mode is**, **Image: flip or mirror is on**
+- **Lens: zoom position (%)** above / below / equal to a value
+- **Pan/tilt: speed is** equal to / above / below a value
+- **Camera: is moving** and **Camera: auto-tracking is on** (need the web login)
+- **Presets: preset is the one last recalled**: on after this module recalls that preset, off once the camera is moved away from it (needs pan/tilt and zoom polling to notice) or another preset is recalled. The camera itself can't report its preset. Also as the variable `last_preset`.
+- **Camera: status is not updating**: polling is on but the camera stopped answering.
+
+## Knob actions
+
+- **Zoom step (for knobs)**: zoom in or out by a percentage of the range. Fast turns add up. Needs "Zoom and focus" polling.
+- **Zoom to position (%)**: 0% wide, 100% full telephoto.

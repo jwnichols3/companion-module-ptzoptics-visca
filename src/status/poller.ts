@@ -9,6 +9,8 @@ export interface PollTarget {
 	/** Send an inquiry, resolving its answer or an error, without logging. */
 	inquire(inquiry: Inquiry<AnswerParameters>): Promise<Answer<AnswerParameters> | Error>
 	setVariableValues(values: CompanionVariableValues): void
+	/** Called after each pass with whether the camera answered anything. */
+	passCompleted(answered: boolean): void
 	log(level: LogLevel, message: string): void
 }
 
@@ -129,6 +131,7 @@ export class StatusPoller {
 		if (anyChanged) {
 			this.#target.setVariableValues(changed)
 		}
+		this.#target.passCompleted(succeeded > 0 || this.#inquiries.every(({ id }) => this.#unsupported.has(id)))
 	}
 
 	#schedule(delay: number): void {

@@ -1,5 +1,6 @@
 import type { CompanionPresetDefinitions } from '@companion-module/base'
 import { AutoTrackingActionId, TrackingId } from '../actions/auto-tracking.js'
+import { FeedbackId } from '../feedbacks/feedbacks.js'
 import { Black, White } from '../utils/colors.js'
 
 export function autoTrackingPresets(): CompanionPresetDefinitions {
@@ -27,7 +28,7 @@ export function autoTrackingPresets(): CompanionPresetDefinitions {
 					up: [],
 				},
 			],
-			feedbacks: [],
+			feedbacks: [{ feedbackId: FeedbackId.AutoTracking, options: {} }],
 		},
 
 		auto_tracking_off: {
@@ -53,7 +54,7 @@ export function autoTrackingPresets(): CompanionPresetDefinitions {
 					up: [],
 				},
 			],
-			feedbacks: [],
+			feedbacks: [{ feedbackId: FeedbackId.AutoTracking, options: {}, isInverted: true }],
 		},
 	}
 }

@@ -378,6 +378,7 @@ export function presetActions(instance: PtzOpticsInstance): ActionDefinitions<Pr
 				}
 
 				instance.sendCommand(PresetRecall, { preset })
+				instance.notePresetRecalled(preset)
 			},
 		},
 		[PresetActionId.SetPresetDriveSpeed]: {

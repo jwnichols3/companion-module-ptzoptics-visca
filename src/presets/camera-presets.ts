@@ -1,6 +1,7 @@
 import type { CompanionButtonPresetDefinition, CompanionPresetDefinitions } from '@companion-module/base'
 import { PresetAsNumberId, PresetAsTextId, PresetIsTextId, RecallPresetId, SetPresetId } from '../actions/presets.js'
 import { isValidPreset } from '../camera/presets.js'
+import { FeedbackId } from '../feedbacks/feedbacks.js'
 import { Black, White } from '../utils/colors.js'
 
 export function cameraPresets(): CompanionPresetDefinitions {
@@ -71,7 +72,7 @@ export function cameraPresets(): CompanionPresetDefinitions {
 										up: [],
 									},
 								],
-								feedbacks: [],
+								feedbacks: [{ feedbackId: FeedbackId.LastPreset, options: { preset: num } }],
 							},
 						],
 					]

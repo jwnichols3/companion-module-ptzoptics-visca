@@ -898,6 +898,21 @@ export class VISCAPort {
 
 					const commandAwaitingInitialResponse = this.#findFirstCommandWaitingForInitialResponse()
 					if (commandAwaitingInitialResponse === undefined) {
+						// A camera in standby answers inquiries it can't
+						// answer now (pan-tilt, zoom, ...) this way.  Fail the
+						// inquiry without dropping the connection, so that
+						// commands such as Power On still reach the camera.
+						const inquiryAwaitingInitialResponse = this.#findFirstInquiryWaitingForInitialResponse()
+						if (inquiryAwaitingInitialResponse !== undefined) {
+							const { i, pendingInquiry } = inquiryAwaitingInitialResponse
+							pendingInquiry.nonfatalError(
+								`The camera can't answer the inquiry ${prettyBytes(pendingInquiry.bytes)} now.  ` +
+									'This is likely because the camera is in standby.',
+							)
+							this.#waitingForInitialResponse.splice(i, 1)
+							continue
+						}
+
 						throw this.#errorWhileProcessingMessage(
 							'Received Command Not Executable with no commands awaiting initial response',
 							returnMessage,

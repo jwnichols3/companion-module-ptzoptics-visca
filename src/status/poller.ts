@@ -38,7 +38,8 @@ export function pollVariableDefinitions(groups: readonly PollGroupId[]): Compani
  * An inquiry that fails while other inquiries in the same pass succeed is
  * assumed unsupported by this camera and is dropped until settings change.
  * If every inquiry in a pass fails, the camera is probably unreachable, so
- * nothing is dropped.
+ * nothing is dropped.  While the camera reports standby, only power is
+ * polled.
  */
 export class StatusPoller {
 	readonly #target: PollTarget
@@ -112,13 +113,18 @@ export class StatusPoller {
 			}
 
 			succeeded++
-			for (const [id, value] of Object.entries(polled.toValues(result, ctx))) {
+			const values = polled.toValues(result, ctx)
+			for (const [id, value] of Object.entries(values)) {
 				if (this.#lastValues.get(id) !== value) {
 					this.#lastValues.set(id, value)
 					changed[id] = value
 					anyChanged = true
 				}
 			}
+
+			// A camera in standby refuses most inquiries.  Skip the rest of the
+			// pass rather than mistake them for unsupported.
+			if (values['power'] === 'standby') break
 		}
 
 		if (succeeded > 0) {

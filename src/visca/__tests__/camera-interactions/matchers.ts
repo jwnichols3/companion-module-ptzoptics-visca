@@ -6,8 +6,7 @@ export function MatchVISCABytes(bytes: Bytes): RegExp {
 }
 
 export const CantBeExecutedNowMatcher = /can't be executed now/
-export const NotExecutableWithNoCommandsAwaitingInitialResponseMatcher =
-	/^Received Command Not Executable with no commands awaiting initial response/
+export const InquiryNotExecutableMatcher = /^The camera can't answer the inquiry/
 export const BlameModuleMatcher = /This is likely a bug in the ptzoptics-visca Companion module./
 
 export const CameraReportedSyntaxErrorMatcher = /^Camera reported a syntax error in the message/

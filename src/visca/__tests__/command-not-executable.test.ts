@@ -7,7 +7,7 @@ import {
 	CameraExpectIncomingBytes,
 	CameraReplyBytes,
 	CommandFailed,
-	InquiryFailedFatally,
+	InquiryFailed,
 	InquirySucceeded,
 	InstanceStatusIs,
 	SendCommand,
@@ -16,7 +16,7 @@ import {
 import {
 	CantBeExecutedNowMatcher,
 	MatchVISCABytes,
-	NotExecutableWithNoCommandsAwaitingInitialResponseMatcher,
+	InquiryNotExecutableMatcher,
 } from './camera-interactions/matchers.js'
 import { RunCameraInteractionTest } from './camera-interactions/run-test.js'
 
@@ -34,18 +34,22 @@ describe('command not executable error', () => {
 		)
 	})
 
-	test('command not executable, no pending commands', async () => {
+	test('inquiry not executable (camera in standby)', async () => {
+		// Seen 2026-11-25: a camera in standby answers a pan-tilt or zoom
+		// inquiry with 90 61 41 FF.  The inquiry fails; the connection stays up.
 		return RunCameraInteractionTest(
 			[
 				SendInquiry(ExposureModeInquiry, 'exposure-mode'),
 				CameraExpectIncomingBytes(ExposureModeInquiryBytes), // exposure-mode
-				CameraReplyBytes(CommandNotExecutable(7)), // exposure-mode
-				InquiryFailedFatally(
-					[NotExecutableWithNoCommandsAwaitingInitialResponseMatcher, MatchVISCABytes(CommandNotExecutable(7))],
-					'exposure-mode',
-				),
+				CameraReplyBytes(CommandNotExecutable(1)), // exposure-mode
+				InquiryFailed([InquiryNotExecutableMatcher, MatchVISCABytes(ExposureModeInquiryBytes)], 'exposure-mode'),
+				InstanceStatusIs(InstanceStatus.Ok),
+				SendCommand(FocusNearStandard, 'focus-near'),
+				CameraExpectIncomingBytes(FocusNearStandardBytes), // focus-near
+				CameraReplyBytes(CommandNotExecutable(0xf)), // focus-near
+				CommandFailed([CantBeExecutedNowMatcher, MatchVISCABytes(FocusNearStandardBytes)], 'focus-near'),
 			],
-			InstanceStatus.ConnectionFailure,
+			InstanceStatus.Ok,
 		)
 	})
 

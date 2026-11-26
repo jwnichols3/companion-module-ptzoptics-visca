@@ -172,6 +172,24 @@ describe('status poller', () => {
 		expect(target.sent).toHaveLength(6)
 	})
 
+	test('polls only power while the camera is in standby, then resumes', async () => {
+		// Seen 2026-11-25: in standby, power answers 90 50 03 FF and pan-tilt,
+		// zoom and the rest answer Command Not Executable.
+		const target = new FakeTarget({ '[81 09 04 00 FF]': { p: 0x3 } })
+		const p = poller(target, [PollGroupId.Power, PollGroupId.Lens])
+		await p.pollOnce()
+		await p.pollOnce()
+		expect(target.sent).toEqual(['[81 09 04 00 FF]', '[81 09 04 00 FF]'])
+		expect(target.values).toEqual([{ power: 'standby' }])
+		expect(target.logs).toEqual([])
+
+		target.answers = { ...RealAnswers }
+		target.sent = []
+		await p.pollOnce()
+		expect(target.sent).toHaveLength(4)
+		expect(target.values[1]).toMatchObject({ power: 'on', zoom: 10487 })
+	})
+
 	test('variable definitions follow the selected groups', () => {
 		expect(pollVariableDefinitions([PollGroupId.Power]).map((v) => v.variableId)).toEqual(['power'])
 		expect(pollVariableDefinitions([])).toEqual([])

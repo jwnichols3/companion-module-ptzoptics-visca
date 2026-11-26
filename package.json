@@ -1,6 +1,6 @@
 {
 	"name": "ptzoptics-visca",
-	"version": "4.1.0-rocket.5",
+	"version": "4.1.0-rocket.6",
 	"type": "module",
 	"main": "dist/main.js",
 	"scripts": {

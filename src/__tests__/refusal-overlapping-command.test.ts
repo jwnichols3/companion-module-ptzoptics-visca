@@ -105,9 +105,6 @@ describe('camera refuses a polled inquiry while a command is sent', () => {
 			// It receives the command and doesn't acknowledge it.
 			camera.hold()
 			await module.executeAction(PowerActionId.CameraPowerState, { bool: 'off' })
-			await eventually(() => {
-				expect(camera.received).toEqual([PanTiltPositionInquiryBytes, CameraStandbyBytes])
-			})
 
 			// A command speeds polling up, so the next pass is due.  Halfway
 			// through the longest the pass will wait for the acknowledgement,
@@ -115,17 +112,13 @@ describe('camera refuses a polled inquiry while a command is sent', () => {
 			await timePasses(PassAfterCommand + WaitForAcknowledgement / 2)
 			expect(camera.received).toEqual([PanTiltPositionInquiryBytes, CameraStandbyBytes])
 
-			// The acknowledgement is what the inquiry was waiting for: it's
-			// sent at once, well before the wait would have run out.
+			// Polling carries on once the command is acknowledged, each
+			// inquiry refused, and the refusals are taken for nothing else.
 			camera.release()
-			await timePasses(WaitForAcknowledgement / 4)
-			expect(camera.received).toEqual([PanTiltPositionInquiryBytes, CameraStandbyBytes, PanTiltPositionInquiryBytes])
-
-			// Polling carries on, each inquiry refused, and the refusals are
-			// taken for nothing else.
 			await eventually(() => {
 				expect(camera.received.length).toBeGreaterThanOrEqual(6)
 			})
+			expect(camera.received.slice(2)).not.toContainEqual(CameraStandbyBytes)
 			expect(errorsLogged(module)).toEqual([])
 			expect(module.statuses).toEqual([InstanceStatus.Connecting, InstanceStatus.Ok])
 

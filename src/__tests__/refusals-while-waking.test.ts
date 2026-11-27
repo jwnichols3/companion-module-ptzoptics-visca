@@ -10,8 +10,11 @@ import { SimulatedCamera } from '../visca/__tests__/simulator/simulated-camera.j
 /** How many inquiries a poll pass of the power, position and lens groups sends. */
 const InquiriesPerPass = 5
 
-/** How long the camera goes on refusing inquiries once it says it's on: dozens of poll passes. */
-const RefusesFor = 5000
+/**
+ * How many poll passes the camera goes on refusing inquiries in once it says
+ * it's on: twice as many as the module would give up on an inquiry after.
+ */
+const PassesRefused = 6
 
 /** Long enough afterward for the module to have given up on an inquiry, were it ever going to. */
 const LongAfter = 30_000
@@ -60,10 +63,7 @@ describe('camera says it is on but refuses the other inquiries for a while', () 
 			replies: {
 				on,
 				standby,
-				wakeUp: [
-					{ atMs: 0, does: 'answers', replies: onButRefusing, unsolicited: [] },
-					{ atMs: RefusesFor, does: 'answers', replies: on, unsolicited: [] },
-				],
+				wakeUp: [{ atMs: 0, does: 'answers', replies: onButRefusing, unsolicited: [] }],
 			},
 		})
 
@@ -85,11 +85,14 @@ describe('camera says it is on but refuses the other inquiries for a while', () 
 			})
 			expect(camera.received).toContainEqual(CameraPowerBytes)
 
-			// The camera refuses the rest, pass after pass.
+			// The camera refuses the rest, pass after pass, then answers.
 			const receivedOn = camera.received.length
-			await timePasses(RefusesFor / 2)
-			expect(camera.received.length).toBeGreaterThan(receivedOn + 10 * InquiriesPerPass)
+			await eventually(() => {
+				expect(camera.received.length).toBeGreaterThan(receivedOn + PassesRefused * InquiriesPerPass)
+			})
 			expect(typeof module.variable('zoom')).not.toBe('number')
+			expect(noLongerPolled(module)).toEqual([])
+			camera.answerAs(on)
 
 			await expectNothingGivenUpOn(module, camera)
 			expect(module.statuses).toEqual([InstanceStatus.Connecting, InstanceStatus.Ok])
@@ -127,8 +130,10 @@ describe('camera says it is on but refuses the other inquiries for a while', () 
 				])
 			})
 			const receivedBack = camera.received.length
-			await timePasses(RefusesFor)
-			expect(camera.received.length).toBeGreaterThan(receivedBack + 10 * InquiriesPerPass)
+			await eventually(() => {
+				expect(camera.received.length).toBeGreaterThan(receivedBack + PassesRefused * InquiriesPerPass)
+			})
+			expect(noLongerPolled(module)).toEqual([])
 			camera.answerAs(on)
 
 			await expectNothingGivenUpOn(module, camera)

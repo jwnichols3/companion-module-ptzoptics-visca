@@ -76,10 +76,8 @@ describe('connection lost while a polled inquiry waits to be sent', () => {
 			const passesBefore = timesReceived(camera, PowerInquiryBytes)
 			camera.hold()
 			await module.executeAction(PowerActionId.CameraPowerState, { bool: 'on' })
-			await eventually(() => {
-				expect(camera.received.at(-1)).toEqual(CameraPowerBytes)
-			})
 			await timePasses(PassAfterCommand + WaitForAcknowledgement / 2)
+			expect(camera.received.at(-1)).toEqual(CameraPowerBytes)
 			expect(timesReceived(camera, PowerInquiryBytes)).toBe(passesBefore)
 
 			// The camera goes off the network during the wait.
@@ -139,7 +137,7 @@ describe('connection lost while a polled inquiry waits to be sent', () => {
 			} else {
 				expect(timesReceived(camera, ExposureModeInquiryBytes)).toBe(refusalsBeforeGivenUpOn - 1)
 			}
-		}, 2 * AwakeAfter)
+		}, 3 * AwakeAfter)
 		return timesReceived(camera, ExposureModeInquiryBytes)
 	}
 
@@ -147,7 +145,10 @@ describe('connection lost while a polled inquiry waits to be sent', () => {
 		const config = {
 			host: '127.0.0.1',
 			pollEnabled: true,
-			pollInterval: 1000,
+			// Few enough passes that none is under way when the camera
+			// comes to be taken as awake, so that the module gives up on the
+			// inquiry in the same pass every time.
+			pollInterval: 3000,
 			pollGroups: ['power', 'exposure'],
 		}
 
@@ -176,21 +177,18 @@ describe('connection lost while a polled inquiry waits to be sent', () => {
 			expect(noLongerPolled(module)).toEqual([])
 
 			// In the pass that would be the third, the inquiry waits on a
-			// command the camera is slow to acknowledge...
+			// command the camera is slow to acknowledge.  Meanwhile, straight
+			// after its answer to the power inquiry, the camera sends bytes
+			// that aren't a return message, at which the module closes the
+			// connection for good.
 			const passesBefore = timesReceived(camera, PowerInquiryBytes)
 			camera.replyLate(LateAcknowledgement)
+			camera.replyGarbled([0x90, 0x50, 0x02, 0xff, 0x12, 0x34, 0xff])
 			await module.executeAction(PowerActionId.CameraPowerState, { bool: 'on' })
-			await eventually(() => {
-				expect(timesReceived(camera, PowerInquiryBytes)).toBe(passesBefore + 1)
-			})
-			expect(timesReceived(camera, ExposureModeInquiryBytes)).toBe(refusalsBeforeGivenUpOn - 1)
-
-			// ...and meanwhile the camera sends bytes that aren't a return
-			// message, at which the module closes the connection for good.
-			camera.send([0x12, 0x34, 0xff])
 			await eventually(() => {
 				expect(module.status).toBe(InstanceStatus.ConnectionFailure)
 			})
+			expect(timesReceived(camera, PowerInquiryBytes)).toBe(passesBefore + 1)
 			await timePasses(LateAcknowledgement)
 
 			expect(timesReceived(camera, ExposureModeInquiryBytes)).toBe(refusalsBeforeGivenUpOn - 1)

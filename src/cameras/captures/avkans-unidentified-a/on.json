@@ -1,6 +1,6 @@
 {
 	"camera": {
-		"brand": "PTZOptics",
+		"brand": "AVKANS",
 		"model": "unknown",
 		"firmware": null,
 		"versionReply": "90 50 00 0D 05 01 01 00 01 FF"
@@ -13,25 +13,25 @@
 			"name": "power",
 			"sent": "81 09 04 00 FF",
 			"received": "90 50 02 FF",
-			"ms": 16
+			"ms": 12
 		},
 		{
 			"name": "pan-tilt",
 			"sent": "81 09 06 12 FF",
-			"received": "90 50 00 03 07 0C 0F 0E 0F 08 FF",
-			"ms": 13
+			"received": "90 50 0F 0F 09 08 0F 0F 09 08 FF",
+			"ms": 16
 		},
 		{
 			"name": "zoom",
 			"sent": "81 09 04 47 FF",
-			"received": "90 50 00 00 08 0A FF",
-			"ms": 13
+			"received": "90 50 01 05 09 00 FF",
+			"ms": 17
 		},
 		{
 			"name": "focus",
 			"sent": "81 09 04 48 FF",
-			"received": "90 50 03 07 05 08 FF",
-			"ms": 14
+			"received": "90 50 03 04 08 0C FF",
+			"ms": 15
 		},
 		{
 			"name": "focus-mode",
@@ -43,61 +43,61 @@
 			"name": "exposure-mode",
 			"sent": "81 09 04 39 FF",
 			"received": "90 50 03 FF",
-			"ms": 14
+			"ms": 12
 		},
 		{
 			"name": "iris",
 			"sent": "81 09 04 4B FF",
-			"received": "90 50 00 00 00 0D FF",
-			"ms": 15
+			"received": "90 50 00 00 00 0A FF",
+			"ms": 17
 		},
 		{
 			"name": "shutter",
 			"sent": "81 09 04 4A FF",
-			"received": "90 50 00 00 00 0B FF",
-			"ms": 12
+			"received": "90 50 00 00 00 07 FF",
+			"ms": 16
 		},
 		{
 			"name": "gain",
 			"sent": "81 09 04 4C FF",
 			"received": "90 50 00 00 00 00 FF",
-			"ms": 11
+			"ms": 13
 		},
 		{
 			"name": "brightness",
 			"sent": "81 09 04 4D FF",
 			"received": "90 50 00 00 01 01 FF",
-			"ms": 13
+			"ms": 350
 		},
 		{
 			"name": "wb-mode",
 			"sent": "81 09 04 35 FF",
 			"received": "90 50 05 FF",
-			"ms": 14
+			"ms": 35
 		},
 		{
 			"name": "wb-red",
 			"sent": "81 09 04 43 FF",
-			"received": "90 50 00 00 05 09 FF",
-			"ms": 347
+			"received": "90 50 00 00 05 0B FF",
+			"ms": 29
 		},
 		{
 			"name": "wb-blue",
 			"sent": "81 09 04 44 FF",
 			"received": "90 50 00 00 0A 0A FF",
-			"ms": 18
+			"ms": 33
 		},
 		{
 			"name": "flip",
 			"sent": "81 09 04 66 FF",
 			"received": "90 50 03 FF",
-			"ms": 11
+			"ms": 33
 		},
 		{
 			"name": "mirror",
 			"sent": "81 09 04 61 FF",
 			"received": "90 50 03 FF",
-			"ms": 12
+			"ms": 35
 		},
 		{
 			"name": "color-temperature",
@@ -120,14 +120,14 @@
 		{
 			"name": "saturation",
 			"sent": "81 09 04 49 FF",
-			"received": "90 50 00 00 00 08 FF",
-			"ms": 15
+			"received": "90 50 00 00 00 07 FF",
+			"ms": 13
 		},
 		{
 			"name": "hue",
 			"sent": "81 09 04 4F FF",
 			"received": "90 50 00 00 00 07 FF",
-			"ms": 12
+			"ms": 19
 		},
 		{
 			"name": "contrast",
@@ -145,13 +145,13 @@
 			"name": "sharpness",
 			"sent": "81 09 04 42 FF",
 			"received": "90 50 00 00 00 05 FF",
-			"ms": 16
+			"ms": 21
 		},
 		{
 			"name": "exposure-compensation",
 			"sent": "81 09 04 4E FF",
 			"received": "90 50 00 00 00 07 FF",
-			"ms": 16
+			"ms": 14
 		}
 	]
 }

@@ -1,6 +1,7 @@
 import { InstanceStatus } from '@companion-module/base'
 import { afterEach, describe, expect, test, vi } from 'vitest'
 import { PowerActionId } from '../actions/power.js'
+import { eventually, timePasses } from './faked-time.js'
 import { ModuleUnderTest } from './module-under-test.js'
 import { PollGroupId } from '../status/groups.js'
 import { CameraPowerBytes } from '../visca/__tests__/camera-interactions/bytes.js'
@@ -9,8 +10,13 @@ import { SimulatedCamera } from '../visca/__tests__/simulator/simulated-camera.j
 
 const CameraStandbyBytes = [0x81, 0x01, 0x04, 0x00, 0x03, 0xff]
 
-/** How late the camera acknowledges a command: later than the next poll pass starts. */
-const LateAcknowledgement = 250
+const PanTiltPositionInquiryBytes = [0x81, 0x09, 0x06, 0x12, 0xff]
+
+/** How soon after a command the next poll pass starts. */
+const PassAfterCommand = 200
+
+/** The longest a polled inquiry waits for a command to be acknowledged. */
+const WaitForAcknowledgement = 100
 
 function errorsLogged(module: ModuleUnderTest): string[] {
 	return module.logs.filter(({ level }) => level === 'error').map(({ message }) => message)
@@ -73,10 +79,9 @@ describe('camera refuses a polled inquiry while a command is sent', () => {
 		}
 	})
 
-	test('command acknowledged late: no inquiry is sent to be refused meanwhile', async () => {
-		// Fake only the timers, not the sockets, so that lateness takes no
-		// real time.  `vi.waitFor` advances the fake timers a little every
-		// time it checks.
+	test('command not yet acknowledged when the next poll pass is due: no inquiry is sent to be refused until it is', async () => {
+		// Fake only the timers, not the sockets, so that the test can stop
+		// partway through the module's wait for the acknowledgement.
 		vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
 
 		const camera = await SimulatedCamera.start({ power: 'standby', replies: HandWrittenCamera.replies })
@@ -89,23 +94,46 @@ describe('camera refuses a polled inquiry while a command is sent', () => {
 			pollGroups: [PollGroupId.Position],
 		})
 		try {
-			await vi.waitFor(() => {
-				expect(camera.received.length).toBe(1)
+			// The first pass: one inquiry, refused.
+			await eventually(() => {
+				expect(camera.received).toEqual([PanTiltPositionInquiryBytes])
 			})
+			await timePasses(PassAfterCommand)
+			expect(camera.received).toHaveLength(1)
 
 			// The camera stays in standby, so it goes on refusing inquiries.
-			camera.replyLate(LateAcknowledgement)
+			// It receives the command and doesn't acknowledge it.
+			camera.hold()
 			await module.executeAction(PowerActionId.CameraPowerState, { bool: 'off' })
-
-			// A command speeds polling up, so the next pass is due before the
-			// acknowledgement.  Let a few passes go by.
-			await vi.waitFor(() => {
-				expect(camera.received.length).toBeGreaterThanOrEqual(5)
+			await eventually(() => {
+				expect(camera.received).toEqual([PanTiltPositionInquiryBytes, CameraStandbyBytes])
 			})
-			expect(camera.received[1]).toEqual(CameraStandbyBytes)
 
+			// A command speeds polling up, so the next pass is due.  Halfway
+			// through the longest the pass will wait for the acknowledgement,
+			// its inquiry still hasn't been sent.
+			await timePasses(PassAfterCommand + WaitForAcknowledgement / 2)
+			expect(camera.received).toEqual([PanTiltPositionInquiryBytes, CameraStandbyBytes])
+
+			// The acknowledgement is what the inquiry was waiting for: it's
+			// sent at once, well before the wait would have run out.
+			camera.release()
+			await timePasses(WaitForAcknowledgement / 4)
+			expect(camera.received).toEqual([PanTiltPositionInquiryBytes, CameraStandbyBytes, PanTiltPositionInquiryBytes])
+
+			// Polling carries on, each inquiry refused, and the refusals are
+			// taken for nothing else.
+			await eventually(() => {
+				expect(camera.received.length).toBeGreaterThanOrEqual(6)
+			})
 			expect(errorsLogged(module)).toEqual([])
 			expect(module.statuses).toEqual([InstanceStatus.Connecting, InstanceStatus.Ok])
+
+			await module.executeAction(PowerActionId.CameraPowerState, { bool: 'on' })
+			await eventually(() => {
+				expect(camera.received).toContainEqual(CameraPowerBytes)
+			})
+			expect(camera.power).toBe('on')
 		} finally {
 			await module.destroy()
 			await camera.stop()

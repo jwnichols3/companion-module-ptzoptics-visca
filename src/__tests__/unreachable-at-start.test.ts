@@ -27,7 +27,7 @@ describe.each(Cameras)(
 			vi.useRealTimers()
 		})
 
-		test('connecting while unreachable, ok within a reconnect interval, and Power On reaches the camera', async () => {
+		test('status is Connecting, never a failure, for as long as the camera has never been reached; ok within a reconnect interval of its appearing; and Power On reaches the camera', async () => {
 			const camera = await SimulatedCamera.start({ power: 'standby', replies })
 			camera.refuseConnections()
 
@@ -45,10 +45,22 @@ describe.each(Cameras)(
 					})
 				})
 
-				// The module keeps trying to make its first connection, so that
-				// Companion and the camera can be started in either order.
-				expect(module.status).toBe(InstanceStatus.Connecting)
-				expect(module.statuses).not.toContain(InstanceStatus.Ok)
+				// This is the port's behavior as it came from upstream, not
+				// something this scenario would choose: until the port has
+				// made its first connection, a failed attempt to connect
+				// changes nothing, so that Companion and the camera can be
+				// started in either order.  The status therefore stays
+				// Connecting, and is never Connection Failure, however long
+				// a camera that has never been reached stays unreachable.
+				// (A camera lost after it was reached does show as a failure:
+				// see `connection-dropped.test.ts`.)
+				vi.advanceTimersByTime(ReconnectInterval)
+				await eventually(() => {
+					expect(
+						module.logs.filter(({ message }) => /^Network error: connect ECONNREFUSED/.test(message)).length,
+					).toBeGreaterThan(1)
+				})
+				expect(module.statuses).toEqual([InstanceStatus.Connecting])
 
 				await camera.acceptConnections()
 

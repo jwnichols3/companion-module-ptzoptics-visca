@@ -4,13 +4,22 @@
 //
 //   node tools/capture-camera.mjs <host> <port> --state on|standby|waking \
 //        --brand <brand> --model <model> [--firmware <version>] [--out <file>] [--allow-power]
+//   node tools/capture-camera.mjs <host> <port> --power-off --allow-power
 //
-// Only read-only inquiries (81 09 ...) are sent.  The one exception is
-// `--state waking`, which sends Power On to a camera in standby and records its
-// answers until they settle; it is refused unless `--allow-power` is given.
-// `--power-off` (also requiring `--allow-power`) sends Power Off and exits.
+// Without `--allow-power`, only read-only inquiries (81 09 ...) are sent, and
+// the camera is left as it was found.
 //
-// The capture contains no address or hostname.
+// Two modes send a command (81 01 ...) that changes the camera's power state.
+// Each is refused unless `--allow-power` is given:
+//
+//  - `--state waking` sends Power On to a camera in standby, and records its
+//    answers until they settle.
+//  - `--power-off` sends Power Off to the camera, whatever state it's in,
+//    prints what the camera replies, and exits.  It records nothing and writes
+//    no capture: it's there to put a camera in standby before a `standby` or
+//    `waking` capture.  It will turn off a camera that's in use.
+//
+// A capture contains no address or hostname.
 //
 // Captures saved as src/cameras/captures/<camera>/{on,standby,waking}.json can
 // be played back to a real Companion by `tools/sim-camera.mjs`.

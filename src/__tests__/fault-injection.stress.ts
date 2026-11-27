@@ -28,14 +28,48 @@ import { SimulatedCamera } from '../visca/__tests__/simulator/simulated-camera.j
 // whatever provoked them.  That is the intended behavior, and it never
 // "returns to ok" unaided.  `late-or-garbled-reply.test.ts` covers it.
 //
-// The seed is `STRESS_SEED` if that's set, and otherwise chosen afresh.  It is
-// logged, named in each test's title, and repeated in any failure, and the
-// same seed always gives the same faults in the same order, so
+// THE SEED IS RANDOM ON EVERY RUN unless `STRESS_SEED` is set: two runs
+// without it inject different faults, so a pass says only that this run's
+// faults were survived.  The seed is logged, named in each test's title, and
+// repeated in any failure, so that
 //
 //     STRESS_SEED=<seed> yarn test:stress
 //
-// runs a failed run again.  (What the seed decides is the faults.  Exactly
-// where between two inquiries a fault lands also depends on the sockets.)
+// runs the same faults again.
+//
+// What the seed fixes: which fault is injected at each of the `FaultCount`
+// steps, how long it lasts, and how long the camera behaves before it.  The
+// same seed always gives the same list, in the same order.
+//
+// What the seed doesn't fix: where a fault lands in the module's polling.
+// The sockets are real, so the inquiry a fault catches, or whether it falls
+// between two passes, can differ from run to run of the same seed.  A failure
+// that depends on that may not come back when its seed is run again.
+//
+// The pass rule, exactly as coded below.  For every camera:
+//
+//  1. To begin, the power variable reads on, and the statuses reported are
+//     Connecting then Ok.
+//  2. Before each fault, while the camera behaves (500 ms to 5 s), no status
+//     is reported.
+//  3. After a fault that leaves the camera unreachable or silent (the
+//     connection drops, with or without attempts to connect then being
+//     refused; the camera goes silent; a reply comes later than the module
+//     waits): from `NoticeMs` after the fault is over, the status becomes Ok
+//     within `RecoveryLimit`, with no Connection Failure reported on the way.
+//     Whatever was reported before that isn't checked.
+//  4. After any other fault (the camera stalls; a reply comes late, but in
+//     time; the camera refuses a message; an inquiry gets some other
+//     inquiry's answer): for a poll interval more, no status is reported.
+//  5. After every fault, a power command sent through the module changes
+//     the camera's power state, and the power variable follows, within
+//     `VariableLimit`, and no status is reported meanwhile.
+//  6. At the end, the statuses reported over the whole run are exactly
+//     Connecting, Ok and Connection Failure, each at least once; a last
+//     Power On reaches the camera; and the status is Ok.
+//
+// Nothing else is checked: not what was logged, not any variable but power,
+// and not whether an inquiry stopped being polled.
 
 /** How many faults are injected, one after another, into each camera. */
 const FaultCount = 1500

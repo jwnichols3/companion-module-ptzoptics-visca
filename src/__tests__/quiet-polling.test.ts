@@ -1,8 +1,10 @@
 import { InstanceStatus } from '@companion-module/base'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
+import { PowerActionId } from '../actions/power.js'
 import { eventually } from './faked-time.js'
 import { ModuleUnderTest } from './module-under-test.js'
 import { PollGroupId } from '../status/groups.js'
+import { CameraPowerBytes } from '../visca/__tests__/camera-interactions/bytes.js'
 import { Cameras, PowerInquiryBytes } from '../visca/__tests__/simulator/cameras.js'
 import { SimulatedCamera } from '../visca/__tests__/simulator/simulated-camera.js'
 
@@ -24,7 +26,7 @@ describe.each(Cameras)('sixty poll passes of every status group: $name', ({ repl
 	})
 
 	test.each(['on', 'standby'] as const)(
-		'camera %s: the connection status never changes, and no log line is repeated',
+		'camera %s: the connection status never changes, no log line is repeated, and Power On reaches the camera',
 		async (power) => {
 			const camera = await SimulatedCamera.start({ power, replies })
 
@@ -50,6 +52,12 @@ describe.each(Cameras)('sixty poll passes of every status group: $name', ({ repl
 
 				const lines = module.logs.map(({ level, message }) => `${level}: ${message}`)
 				expect(lines).toEqual([...new Set(lines)])
+
+				await module.executeAction(PowerActionId.CameraPowerState, { bool: 'on' })
+				await eventually(() => {
+					expect(camera.received).toContainEqual(CameraPowerBytes)
+				})
+				expect(camera.power).toBe('on')
 			} finally {
 				await module.destroy()
 				await camera.stop()

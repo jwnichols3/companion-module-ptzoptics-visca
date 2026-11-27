@@ -1,6 +1,7 @@
 import { InstanceStatus } from '@companion-module/base'
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import { PowerActionId } from '../actions/power.js'
+import type { CameraPowerState } from '../camera/power.js'
 import { describeEachCamera, stateInWords } from './each-camera.js'
 import { eventually } from './faked-time.js'
 import { ModuleUnderTest } from './module-under-test.js'
@@ -15,7 +16,7 @@ const PollPasses = 60
 /** Longer than sixty poll passes take, even if every inquiry in every pass is slow to be answered. */
 const LongEnough = 10 * 60 * 1000
 
-for (const power of ['on', 'standby'] as const) {
+function scenarios<Power extends CameraPowerState>(power: Power): void {
 	describeEachCamera(
 		`sixty poll passes of every status group, camera ${stateInWords(power)}`,
 		[power],
@@ -88,3 +89,6 @@ for (const power of ['on', 'standby'] as const) {
 		},
 	)
 }
+
+scenarios('on')
+scenarios('standby')

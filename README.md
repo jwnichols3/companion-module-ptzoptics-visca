@@ -30,3 +30,5 @@ A capture of the camera waking (`--state waking --allow-power`, saved as `waking
 Then add the definition in `src/cameras/` and list it in `src/cameras/index.ts`. `yarn test` checks every definition against its captures and says where they disagree, and runs the whole-module scenarios against every camera that has captures.
 
 Captures are welcome before a definition can be written: of a camera in only one power state, or with its model or firmware not yet known. Save them the same way. The scenarios then run against that camera in the state it was recorded in, and list as skipped the ones that need the other state. An inquiry the camera left unanswered is played back as it was: the simulated camera sends nothing in reply.
+
+One behaviour is known that no capture shows. Some cameras close the connection on a schedule (the ones seen do it every 12 hours, to the minute) and then send, on the next connection, their replies to inquiries left unanswered on the old one. The module makes the new connection at once and ignores a reply that arrives while nothing awaits one; `src/__tests__/leftover-replies.test.ts` plays this against every camera.

@@ -837,6 +837,10 @@ export class VISCAPort {
 
 				const result = this.#findFirstCommandWaitingForInitialResponse()
 				if (result === undefined) {
+					if (this.#ignoredAsUnsolicited('ACK', returnMessage)) {
+						continue
+					}
+
 					throw this.#errorWhileProcessingMessage(`Received ACK without a pending command`, returnMessage)
 				}
 				const { i, pendingCommand } = result
@@ -881,6 +885,10 @@ export class VISCAPort {
 					const commandsInSocket = this.#waitingForCompletion.get(socket)
 					const command = commandsInSocket && commandsInSocket.shift()
 					if (command === undefined) {
+						if (this.#ignoredAsUnsolicited('Completion', returnMessage)) {
+							continue
+						}
+
 						throw this.#errorWhileProcessingMessage(
 							`Received Completion for socket ${socket}, but no command is executing in it`,
 							returnMessage,
@@ -896,16 +904,7 @@ export class VISCAPort {
 
 				const result = this.#findFirstInquiryWaitingForInitialResponse()
 				if (result === undefined) {
-					// A camera that has just powered on may answer an inquiry
-					// it was sent while powering on, even on an earlier
-					// connection.  If nothing at all awaits a response, the
-					// answer can't be mistaken for the response to anything,
-					// so ignore it.
-					if (
-						this.#waitingForInitialResponse.length === 0 &&
-						this.#waitingForCompletion.values().every((commands) => commands.length === 0)
-					) {
-						this.#instance.log('debug', `Ignoring unsolicited inquiry response ${prettyBytes(returnMessage)}`)
+					if (this.#ignoredAsUnsolicited('inquiry response', returnMessage)) {
 						continue
 					}
 
@@ -956,6 +955,10 @@ export class VISCAPort {
 			if ((secondByte & 0xf0) === 0x60) {
 				if (returnMessage.length !== 4) {
 					throw this.#errorWhileProcessingMessage('Encountered error response of unexpected length', returnMessage)
+				}
+
+				if (this.#ignoredAsUnsolicited('error response', returnMessage)) {
+					continue
 				}
 
 				const thirdByte = returnMessage[2]
@@ -1090,6 +1093,34 @@ export class VISCAPort {
 
 			throw this.#errorWhileProcessingMessage('Received response with unrecognized format', returnMessage)
 		} // for await (const returnMessage of returnMessages)
+	}
+
+	/**
+	 * Ignore a return message, of the given kind, if nothing at all awaits a
+	 * response: no message its initial response, and no acknowledged command
+	 * its Completion.
+	 *
+	 * A camera may send, on a new connection, its replies to messages it was
+	 * sent on an earlier one: a camera that has just powered on, to inquiries
+	 * sent while it was powering on; and a camera that itself closed the
+	 * earlier connection, to inquiries unanswered when it did.  Such a reply
+	 * can be an answer, or the Command Not Executable of a camera in standby.
+	 * While nothing awaits a response it can't be mistaken for the response
+	 * to anything, so it's harmless, and is no reason to close the port.
+	 *
+	 * @returns
+	 *    Whether the return message was ignored.
+	 */
+	#ignoredAsUnsolicited(kind: string, returnMessage: Bytes): boolean {
+		if (
+			this.#waitingForInitialResponse.length > 0 ||
+			this.#waitingForCompletion.values().some((commands) => commands.length > 0)
+		) {
+			return false
+		}
+
+		this.#instance.log('debug', `Ignoring unsolicited ${kind} ${prettyBytes(returnMessage)}`)
+		return true
 	}
 
 	// The next two functions are almost unifiable into one, but it would

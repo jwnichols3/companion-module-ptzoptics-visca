@@ -53,8 +53,8 @@ export type WakeUpStep = { readonly atMs: number } & (
  * the states the replies are known to cover: both, unless told otherwise.
  */
 export type CameraReplies<Recorded extends CameraPowerState = CameraPowerState> = {
-	readonly [state in Recorded]: StateReplies
-} & { readonly [state in Exclude<CameraPowerState, Recorded>]?: StateReplies } & {
+	readonly [state in CameraPowerState]?: StateReplies
+} & { readonly [state in Recorded]: StateReplies } & {
 	/**
 	 * What the camera does after it's told to power on, in order.  Once the
 	 * last step is done the camera is awake, answering as that step left it.
@@ -176,6 +176,9 @@ export class SimulatedCamera {
 	/** The TCP port the camera is listening on. */
 	readonly port: number
 
+	/** How many connections the camera has accepted. */
+	connectionsAccepted = 0
+
 	/** Every message the camera has received, oldest first. */
 	readonly received: Bytes[] = []
 
@@ -199,6 +202,7 @@ export class SimulatedCamera {
 		this.#latencyMs = latencyMs
 
 		server.on('connection', (socket: net.Socket) => {
+			this.connectionsAccepted++
 			this.#sockets.add(socket)
 			socket.once('close', () => {
 				this.#sockets.delete(socket)

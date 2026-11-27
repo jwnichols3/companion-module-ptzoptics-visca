@@ -16,6 +16,9 @@ import { SimulatedCamera } from '../visca/__tests__/simulator/simulated-camera.j
 //
 //  - the connection drops;
 //  - the connection drops and attempts to connect are refused for a while;
+//  - the camera closes the connection with an inquiry unanswered, then sends
+//    on the next connection, before anything is asked on it, the replies it
+//    owed on the old one: an answer, and a refusal (`90 61 41 FF`);
 //  - the camera goes silent for a while without closing the connection;
 //  - the camera stalls, for less time than the module waits for an answer;
 //  - one reply comes late, or later than the module waits for an answer;
@@ -54,8 +57,8 @@ import { SimulatedCamera } from '../visca/__tests__/simulator/simulated-camera.j
 //     is reported.
 //  3. After a fault that leaves the camera unreachable or silent (the
 //     connection drops, with or without attempts to connect then being
-//     refused; the camera goes silent; a reply comes later than the module
-//     waits): from `NoticeMs` after the fault is over, the status becomes Ok
+//     refused, or leftover replies then being sent; the camera goes silent;
+//     a reply comes later than the module waits): from `NoticeMs` after the fault is over, the status becomes Ok
 //     within `RecoveryLimit`, with no Connection Failure reported on the way.
 //     Whatever was reported before that isn't checked.
 //  4. After any other fault (the camera stalls; a reply comes late, but in
@@ -106,6 +109,7 @@ const AnswerToSomethingElse = [0x90, 0x50, 0x7f, 0x7f, 0x7f, 0xff]
 type Fault =
 	| { readonly does: 'drops-connection' }
 	| { readonly does: 'unreachable'; readonly ms: number }
+	| { readonly does: 'closes-then-sends-leftover-replies' }
 	| { readonly does: 'silent'; readonly ms: number }
 	| { readonly does: 'stalls'; readonly ms: number }
 	| { readonly does: 'replies-late'; readonly ms: number }
@@ -158,6 +162,7 @@ function plannedFaults(seed: number, count: number): PlannedFault[] {
 		() => ({ does: 'replies-too-late', ms: between(InquiryTimeout + 500, 8000) }),
 		() => ({ does: 'refuses' }),
 		() => ({ does: 'answers-something-else' }),
+		() => ({ does: 'closes-then-sends-leftover-replies' }),
 	]
 
 	return Array.from({ length: count }, () => {
@@ -176,9 +181,9 @@ test('a seed always gives the same faults, so a failed run can be run again', ()
 	expect(plannedFaults(2026, 6)).toEqual([
 		{ afterMs: 2549, fault: { does: 'silent', ms: 11103 } },
 		{ afterMs: 3283, fault: { does: 'unreachable', ms: 2296 } },
-		{ afterMs: 3572, fault: { does: 'refuses' } },
+		{ afterMs: 3572, fault: { does: 'answers-something-else' } },
 		{ afterMs: 1820, fault: { does: 'drops-connection' } },
-		{ afterMs: 799, fault: { does: 'replies-late', ms: 838 } },
+		{ afterMs: 799, fault: { does: 'replies-too-late', ms: 5249 } },
 		{ afterMs: 1015, fault: { does: 'unreachable', ms: 3377 } },
 	])
 
@@ -256,6 +261,21 @@ describeEachCamera(
 						await timePasses(fault.ms)
 						await camera.acceptConnections()
 						return true
+					case 'closes-then-sends-leftover-replies': {
+						// The camera has an inquiry it hasn't answered when
+						// it closes the connection, and sends the replies it
+						// owed as soon as the next connection is made.
+						camera.hold()
+						await messageReceived()
+						const connectionsBefore = camera.connectionsAccepted
+						camera.dropConnection()
+						camera.release()
+						await eventually(() => {
+							expect(camera.connectionsAccepted).toBeGreaterThan(connectionsBefore)
+						})
+						camera.send([0x90, 0x50, camera.power === 'on' ? 0x02 : 0x03, 0xff, ...CommandNotExecutable(1)])
+						return true
+					}
 					case 'silent':
 						camera.stall(fault.ms)
 						await timePasses(fault.ms)

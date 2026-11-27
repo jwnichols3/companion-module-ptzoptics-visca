@@ -1,8 +1,8 @@
 {
 	"camera": {
 		"brand": "PTZOptics",
-		"model": "unknown",
-		"firmware": null,
+		"model": "20X (F64.HI)",
+		"firmware": "SOC v9.1.34",
 		"versionReply": "90 50 00 01 00 00 00 00 53 FF"
 	},
 	"state": "standby",
@@ -24,13 +24,13 @@
 		{
 			"name": "zoom",
 			"sent": "81 09 04 47 FF",
-			"received": "90 50 00 00 00 00 FF",
+			"received": "90 50 00 08 00 07 FF",
 			"ms": 20
 		},
 		{
 			"name": "focus",
 			"sent": "81 09 04 48 FF",
-			"received": "90 50 01 01 09 06 FF",
+			"received": "90 50 01 00 07 0D FF",
 			"ms": 20
 		},
 		{
@@ -73,7 +73,7 @@
 			"name": "wb-mode",
 			"sent": "81 09 04 35 FF",
 			"received": "90 50 00 FF",
-			"ms": 21
+			"ms": 20
 		},
 		{
 			"name": "wb-red",
@@ -85,73 +85,73 @@
 			"name": "wb-blue",
 			"sent": "81 09 04 44 FF",
 			"received": "90 50 00 00 08 02 FF",
-			"ms": 20
+			"ms": 21
 		},
 		{
 			"name": "flip",
 			"sent": "81 09 04 66 FF",
 			"received": "90 50 03 FF",
-			"ms": 23
+			"ms": 19
 		},
 		{
 			"name": "mirror",
 			"sent": "81 09 04 61 FF",
 			"received": "90 50 03 FF",
-			"ms": 20
+			"ms": 21
 		},
 		{
 			"name": "color-temperature",
 			"sent": "81 09 04 20 FF",
 			"received": "90 50 28 FF",
-			"ms": 20
+			"ms": 25
 		},
 		{
 			"name": "red-tuning",
 			"sent": "81 09 04 12 FF",
 			"received": "90 50 00 00 00 0D FF",
-			"ms": 20
+			"ms": 16
 		},
 		{
 			"name": "blue-tuning",
 			"sent": "81 09 04 13 FF",
 			"received": "90 50 00 00 00 0B FF",
-			"ms": 21
+			"ms": 20
 		},
 		{
 			"name": "saturation",
 			"sent": "81 09 04 49 FF",
 			"received": "90 50 00 00 00 04 FF",
-			"ms": 20
+			"ms": 22
 		},
 		{
 			"name": "hue",
 			"sent": "81 09 04 4F FF",
 			"received": "90 50 00 00 00 07 FF",
-			"ms": 21
+			"ms": 20
 		},
 		{
 			"name": "contrast",
 			"sent": "81 09 04 A2 FF",
 			"received": "90 50 00 00 00 07 FF",
-			"ms": 20
+			"ms": 41
 		},
 		{
 			"name": "luminance",
 			"sent": "81 09 04 A1 FF",
 			"received": "90 50 00 00 00 07 FF",
-			"ms": 20
+			"ms": 41
 		},
 		{
 			"name": "sharpness",
 			"sent": "81 09 04 42 FF",
 			"received": "90 50 00 00 00 04 FF",
-			"ms": 20
+			"ms": 43
 		},
 		{
 			"name": "exposure-compensation",
 			"sent": "81 09 04 4E FF",
 			"received": "90 50 00 00 00 06 FF",
-			"ms": 22
+			"ms": 40
 		}
 	]
 }

@@ -1,8 +1,8 @@
 {
 	"camera": {
 		"brand": "PTZOptics",
-		"model": "unknown",
-		"firmware": null,
+		"model": "20X (F64.HI)",
+		"firmware": "SOC v9.1.34",
 		"versionReply": "90 50 00 01 00 00 00 00 53 FF"
 	},
 	"state": "waking",
@@ -22,11 +22,11 @@
 			]
 		},
 		{
-			"atMs": 2024,
+			"atMs": 2047,
 			"event": "connected"
 		},
 		{
-			"atMs": 2024,
+			"atMs": 2047,
 			"exchanges": [
 				{
 					"name": "power",
@@ -37,11 +37,11 @@
 			]
 		},
 		{
-			"atMs": 14352,
+			"atMs": 15054,
 			"event": "connected"
 		},
 		{
-			"atMs": 14352,
+			"atMs": 15054,
 			"exchanges": [
 				{
 					"name": "power",
@@ -52,11 +52,11 @@
 			]
 		},
 		{
-			"atMs": 16353,
+			"atMs": 17058,
 			"event": "connected"
 		},
 		{
-			"atMs": 16353,
+			"atMs": 17058,
 			"exchanges": [
 				{
 					"name": "power",
@@ -67,11 +67,11 @@
 			]
 		},
 		{
-			"atMs": 18357,
+			"atMs": 19060,
 			"event": "connected"
 		},
 		{
-			"atMs": 18357,
+			"atMs": 19060,
 			"exchanges": [
 				{
 					"name": "power",
@@ -82,11 +82,11 @@
 			]
 		},
 		{
-			"atMs": 20361,
+			"atMs": 21063,
 			"event": "connected"
 		},
 		{
-			"atMs": 20361,
+			"atMs": 21063,
 			"exchanges": [
 				{
 					"name": "power",
@@ -97,11 +97,11 @@
 			]
 		},
 		{
-			"atMs": 22365,
+			"atMs": 23067,
 			"event": "connected"
 		},
 		{
-			"atMs": 22365,
+			"atMs": 23067,
 			"exchanges": [
 				{
 					"name": "power",
@@ -112,11 +112,11 @@
 			]
 		},
 		{
-			"atMs": 24369,
+			"atMs": 25070,
 			"event": "connected"
 		},
 		{
-			"atMs": 24369,
+			"atMs": 25070,
 			"exchanges": [
 				{
 					"name": "power",
@@ -127,37 +127,22 @@
 			]
 		},
 		{
-			"atMs": 26373,
+			"atMs": 27073,
 			"event": "connected"
 		},
 		{
-			"atMs": 26373,
-			"exchanges": [
-				{
-					"name": "power",
-					"sent": "81 09 04 00 FF",
-					"received": null,
-					"ms": null
-				}
-			]
-		},
-		{
-			"atMs": 28376,
-			"event": "connected"
-		},
-		{
-			"atMs": 31142,
+			"atMs": 30681,
 			"event": "unsolicited",
 			"received": ["90 50 02 FF"]
 		},
 		{
-			"atMs": 31142,
+			"atMs": 30681,
 			"exchanges": [
 				{
 					"name": "power",
 					"sent": "81 09 04 00 FF",
 					"received": "90 50 02 FF",
-					"ms": 9
+					"ms": 3
 				},
 				{
 					"name": "pan-tilt",
@@ -169,37 +154,37 @@
 					"name": "zoom",
 					"sent": "81 09 04 47 FF",
 					"received": "90 50 00 0C 06 08 FF",
-					"ms": 21
+					"ms": 20
 				},
 				{
 					"name": "focus",
 					"sent": "81 09 04 48 FF",
-					"received": "90 50 00 0F 0C 02 FF",
-					"ms": 20
+					"received": "90 50 00 0F 0C 00 FF",
+					"ms": 21
 				},
 				{
 					"name": "focus-mode",
 					"sent": "81 09 04 38 FF",
 					"received": "90 50 02 FF",
-					"ms": 22
+					"ms": 23
 				},
 				{
 					"name": "exposure-mode",
 					"sent": "81 09 04 39 FF",
 					"received": "90 50 00 FF",
-					"ms": 20
+					"ms": 21
 				},
 				{
 					"name": "iris",
 					"sent": "81 09 04 4B FF",
 					"received": "90 50 00 00 01 01 FF",
-					"ms": 21
+					"ms": 20
 				},
 				{
 					"name": "shutter",
 					"sent": "81 09 04 4A FF",
 					"received": "90 50 00 00 00 05 FF",
-					"ms": 21
+					"ms": 23
 				},
 				{
 					"name": "gain",
@@ -211,13 +196,13 @@
 					"name": "brightness",
 					"sent": "81 09 04 4D FF",
 					"received": "90 50 00 00 00 07 FF",
-					"ms": 21
+					"ms": 20
 				},
 				{
 					"name": "wb-mode",
 					"sent": "81 09 04 35 FF",
 					"received": "90 50 00 FF",
-					"ms": 21
+					"ms": 23
 				},
 				{
 					"name": "wb-red",
@@ -235,7 +220,7 @@
 					"name": "flip",
 					"sent": "81 09 04 66 FF",
 					"received": "90 50 03 FF",
-					"ms": 23
+					"ms": 19
 				},
 				{
 					"name": "mirror",
@@ -247,13 +232,13 @@
 					"name": "color-temperature",
 					"sent": "81 09 04 20 FF",
 					"received": "90 50 28 FF",
-					"ms": 20
+					"ms": 23
 				},
 				{
 					"name": "red-tuning",
 					"sent": "81 09 04 12 FF",
 					"received": "90 50 00 00 00 0D FF",
-					"ms": 21
+					"ms": 22
 				},
 				{
 					"name": "blue-tuning",
@@ -265,7 +250,7 @@
 					"name": "saturation",
 					"sent": "81 09 04 49 FF",
 					"received": "90 50 00 00 00 04 FF",
-					"ms": 21
+					"ms": 24
 				},
 				{
 					"name": "hue",
@@ -277,19 +262,19 @@
 					"name": "contrast",
 					"sent": "81 09 04 A2 FF",
 					"received": "90 50 00 00 00 07 FF",
-					"ms": 20
+					"ms": 22
 				},
 				{
 					"name": "luminance",
 					"sent": "81 09 04 A1 FF",
 					"received": "90 50 00 00 00 07 FF",
-					"ms": 22
+					"ms": 25
 				},
 				{
 					"name": "sharpness",
 					"sent": "81 09 04 42 FF",
 					"received": "90 50 00 00 00 04 FF",
-					"ms": 21
+					"ms": 20
 				},
 				{
 					"name": "exposure-compensation",
@@ -300,31 +285,31 @@
 			]
 		},
 		{
-			"atMs": 32156,
+			"atMs": 31700,
 			"exchanges": [
 				{
 					"name": "power",
 					"sent": "81 09 04 00 FF",
 					"received": "90 50 02 FF",
-					"ms": 26
+					"ms": 20
 				},
 				{
 					"name": "pan-tilt",
 					"sent": "81 09 06 12 FF",
 					"received": "90 50 0F 0E 0C 06 0F 0F 0B 0C FF",
-					"ms": 21
+					"ms": 22
 				},
 				{
 					"name": "zoom",
 					"sent": "81 09 04 47 FF",
 					"received": "90 50 00 0C 06 08 FF",
-					"ms": 22
+					"ms": 19
 				},
 				{
 					"name": "focus",
 					"sent": "81 09 04 48 FF",
-					"received": "90 50 00 0F 0C 02 FF",
-					"ms": 23
+					"received": "90 50 00 0F 0C 00 FF",
+					"ms": 21
 				},
 				{
 					"name": "focus-mode",
@@ -342,13 +327,13 @@
 					"name": "iris",
 					"sent": "81 09 04 4B FF",
 					"received": "90 50 00 00 01 01 FF",
-					"ms": 24
+					"ms": 20
 				},
 				{
 					"name": "shutter",
 					"sent": "81 09 04 4A FF",
 					"received": "90 50 00 00 00 05 FF",
-					"ms": 22
+					"ms": 23
 				},
 				{
 					"name": "gain",
@@ -360,19 +345,19 @@
 					"name": "brightness",
 					"sent": "81 09 04 4D FF",
 					"received": "90 50 00 00 00 07 FF",
-					"ms": 21
+					"ms": 26
 				},
 				{
 					"name": "wb-mode",
 					"sent": "81 09 04 35 FF",
 					"received": "90 50 00 FF",
-					"ms": 21
+					"ms": 28
 				},
 				{
 					"name": "wb-red",
 					"sent": "81 09 04 43 FF",
 					"received": "90 50 00 00 07 08 FF",
-					"ms": 21
+					"ms": 17
 				},
 				{
 					"name": "wb-blue",
@@ -384,71 +369,71 @@
 					"name": "flip",
 					"sent": "81 09 04 66 FF",
 					"received": "90 50 03 FF",
-					"ms": 20
+					"ms": 22
 				},
 				{
 					"name": "mirror",
 					"sent": "81 09 04 61 FF",
 					"received": "90 50 03 FF",
-					"ms": 22
+					"ms": 25
 				},
 				{
 					"name": "color-temperature",
 					"sent": "81 09 04 20 FF",
 					"received": "90 50 28 FF",
-					"ms": 19
+					"ms": 16
 				},
 				{
 					"name": "red-tuning",
 					"sent": "81 09 04 12 FF",
 					"received": "90 50 00 00 00 0D FF",
-					"ms": 21
+					"ms": 26
 				},
 				{
 					"name": "blue-tuning",
 					"sent": "81 09 04 13 FF",
 					"received": "90 50 00 00 00 0B FF",
-					"ms": 21
+					"ms": 15
 				},
 				{
 					"name": "saturation",
 					"sent": "81 09 04 49 FF",
 					"received": "90 50 00 00 00 04 FF",
-					"ms": 23
+					"ms": 22
 				},
 				{
 					"name": "hue",
 					"sent": "81 09 04 4F FF",
 					"received": "90 50 00 00 00 07 FF",
-					"ms": 22
+					"ms": 23
 				},
 				{
 					"name": "contrast",
 					"sent": "81 09 04 A2 FF",
 					"received": "90 50 00 00 00 07 FF",
-					"ms": 19
+					"ms": 18
 				},
 				{
 					"name": "luminance",
 					"sent": "81 09 04 A1 FF",
 					"received": "90 50 00 00 00 07 FF",
-					"ms": 20
+					"ms": 24
 				},
 				{
 					"name": "sharpness",
 					"sent": "81 09 04 42 FF",
 					"received": "90 50 00 00 00 04 FF",
-					"ms": 21
+					"ms": 23
 				},
 				{
 					"name": "exposure-compensation",
 					"sent": "81 09 04 4E FF",
 					"received": "90 50 00 00 00 06 FF",
-					"ms": 22
+					"ms": 19
 				}
 			]
 		}
 	],
 	"settled": true,
-	"commandReplies": ["90 41 FF", "90 51 FF"]
+	"commandReplies": ["90 42 FF", "90 52 FF"]
 }

@@ -49,7 +49,7 @@ const InquiryTimeoutMs = 3000
  * shorter.  Short enough that a button press never feels delayed even if the
  * camera has stopped answering.
  */
-const OverlapWaitLimitMs = 100
+export const OverlapWaitLimitMs = 100
 
 /** Wait for the promise to resolve, but for no longer than the given number of milliseconds. */
 async function resolvedWithin(promise: Promise<void>, ms: number): Promise<void> {

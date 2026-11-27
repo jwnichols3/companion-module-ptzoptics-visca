@@ -64,6 +64,12 @@ type SimulatedCameraOptions = {
 	 * shorten a wake-up that took a real camera half a minute.  1 if omitted.
 	 */
 	readonly wakeUpSpeed?: number
+	/**
+	 * How many milliseconds the camera takes over each reply, as a real
+	 * camera takes about ten: every reply is sent this long after its message
+	 * arrives.  0 if omitted.
+	 */
+	readonly latencyMs?: number
 	/** The address to listen on.  `127.0.0.1` if omitted. */
 	readonly host?: string
 	/** The TCP port to listen on.  One the OS chooses if omitted. */
@@ -125,6 +131,7 @@ export class SimulatedCamera {
 	#answers: StateReplies
 
 	readonly #wakeUpSpeed: number
+	readonly #latencyMs: number
 	readonly #host: string
 	readonly #log: (line: string) => void
 
@@ -150,10 +157,13 @@ export class SimulatedCamera {
 	/** Every message the camera has received, oldest first. */
 	readonly received: Bytes[] = []
 
+	/** When each message in `received` arrived, in milliseconds, by `performance.now()`. */
+	readonly receivedAt: number[] = []
+
 	private constructor(
 		server: net.Server,
 		port: number,
-		{ power, replies, wakeUpSpeed = 1, host = '127.0.0.1', log = () => {} }: SimulatedCameraOptions,
+		{ power, replies, wakeUpSpeed = 1, latencyMs = 0, host = '127.0.0.1', log = () => {} }: SimulatedCameraOptions,
 	) {
 		this.#server = server
 		this.#host = host
@@ -163,6 +173,7 @@ export class SimulatedCamera {
 		this.#replies = replies
 		this.#answers = replies[power]
 		this.#wakeUpSpeed = wakeUpSpeed
+		this.#latencyMs = latencyMs
 
 		server.on('connection', (socket: net.Socket) => {
 			this.#sockets.add(socket)
@@ -186,6 +197,7 @@ export class SimulatedCamera {
 					pending = pending.slice(terminator + 1)
 
 					this.received.push(message)
+					this.receivedAt.push(performance.now())
 					this.#log(`received ${hex(message)}`)
 					if (this.#silent) {
 						// Received, and never answered.
@@ -334,14 +346,14 @@ export class SimulatedCamera {
 		}
 
 		const fault = this.#replyFaults.shift()
-		if (fault === undefined) {
-			send(reply)
-		} else if ('late' in fault) {
-			setTimeout(() => {
-				send(reply)
-			}, fault.late)
+		const bytes = fault !== undefined && 'garbled' in fault ? fault.garbled : reply
+		const afterMs = this.#latencyMs + (fault !== undefined && 'late' in fault ? fault.late : 0)
+		if (afterMs === 0) {
+			send(bytes)
 		} else {
-			send(fault.garbled)
+			setTimeout(() => {
+				send(bytes)
+			}, afterMs)
 		}
 	}
 

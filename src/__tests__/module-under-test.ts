@@ -87,6 +87,9 @@ export class ModuleUnderTest {
 	/** Every line the module has logged, oldest first. */
 	readonly logs: { readonly level: LogLevel; readonly message: string }[] = []
 
+	/** Called with each line the module logs, as it's logged, if set: for a test that times what's logged. */
+	onLog: ((message: string) => void) | null = null
+
 	private constructor() {
 		interceptProcessSend()
 		receiveFromInstance = (msg) => {
@@ -189,6 +192,7 @@ export class ModuleUnderTest {
 				break
 			case 'log-message':
 				this.logs.push({ level: payload.level, message: payload.message })
+				this.onLog?.(payload.message)
 				break
 			case 'setVariableDefinitions':
 			case 'setVariableValues':

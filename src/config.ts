@@ -1,4 +1,5 @@
 import { type InputValue, Regex, type SomeCompanionConfigField } from '@companion-module/base'
+import { type CameraDefinition, CameraDefinitions, GenericVisca } from './cameras/index.js'
 import { FastPollIntervalMs } from './status/poller.js'
 import { DefaultPollGroups, isPollGroupId, type PollGroupId, pollGroupChoices } from './status/groups.js'
 import type { Branded } from './utils/brand.js'
@@ -31,6 +32,31 @@ export function tryUpdateConfigWithDebugLogging(config: RawConfig): boolean {
 	}
 
 	return false
+}
+
+/** The id of the camera-model config option. */
+export const CameraModelOptionId = 'cameraModel'
+
+/**
+ * A config option was added to choose the camera model, which determines the
+ * status inquiries the camera is polled with.  Older configs get the model
+ * that polls as the module did before the option existed.
+ */
+export function tryUpdateConfigWithCameraModel(config: RawConfig): boolean {
+	if (!(CameraModelOptionId in config)) {
+		config[CameraModelOptionId] = GenericVisca.id
+		return true
+	}
+
+	return false
+}
+
+/**
+ * The camera definition the given config option value names, or Generic VISCA
+ * if it names none.
+ */
+export function cameraDefinition(cameraModel: unknown): CameraDefinition {
+	return CameraDefinitions.find(({ id }) => id === cameraModel) ?? GenericVisca
 }
 
 /** Compute the config fields list for this module. */
@@ -78,6 +104,17 @@ export function getConfigFields(): SomeCompanionConfigField[] {
 				'(power, pan/tilt, zoom, focus, ...).  Off by default.',
 		},
 		{
+			type: 'dropdown',
+			id: CameraModelOptionId,
+			label: 'Camera model',
+			tooltip:
+				'Which status the camera is asked for.  Generic VISCA works with any camera: it asks for ' +
+				"everything selected below and stops asking for what the camera doesn't answer.",
+			choices: CameraDefinitions.map(({ id, label }) => ({ id, label })),
+			default: GenericVisca.id,
+			width: 12,
+		},
+		{
 			type: 'checkbox',
 			id: PollEnabledOptionId,
 			label: 'Poll camera status',
@@ -97,10 +134,12 @@ export function getConfigFields(): SomeCompanionConfigField[] {
 		{
 			type: 'number',
 			id: ZoomMaxOptionId,
-			label: 'Zoom position at full telephoto',
-			tooltip: 'Used to compute the zoom_pct variable.  16384 (0x4000) for most PTZOptics cameras.',
-			default: DefaultZoomMax,
-			min: 1,
+			label: "Zoom position at full telephoto (0: the camera model's)",
+			tooltip:
+				'Used to compute the zoom_pct variable.  Leave at 0 to use the position for the camera model ' +
+				'chosen above: 16384 (0x4000) for Generic VISCA.',
+			default: ZoomMaxFromCameraModel,
+			min: ZoomMaxFromCameraModel,
 			max: 0xffff,
 			width: 4,
 		},
@@ -192,7 +231,8 @@ const ZoomMaxOptionId = 'zoomMax'
 const DefaultPollInterval = 1000
 const MinPollInterval = 100
 const MaxPollInterval = 60000
-const DefaultZoomMax = 0x4000
+/** The full-telephoto zoom position that stands for "use the camera model's". */
+const ZoomMaxFromCameraModel = 0
 
 /** Validated config information for the camera connection being manipulated. */
 export type PtzOpticsConfig = {
@@ -208,6 +248,9 @@ export type PtzOpticsConfig = {
 	 * handling state, etc.
 	 */
 	[DebugLoggingOptionId]: boolean
+
+	/** The id of the camera definition that determines what is polled. */
+	[CameraModelOptionId]: string
 
 	/** Whether to poll the camera for status and expose it as variables. */
 	[PollEnabledOptionId]: boolean
@@ -238,10 +281,11 @@ export function noCameraConfig(): PtzOpticsConfig {
 		host: '',
 		port: DefaultPort,
 		debugLogging: false,
+		cameraModel: GenericVisca.id,
 		pollEnabled: false,
 		pollInterval: DefaultPollInterval,
 		pollGroups: [...DefaultPollGroups],
-		zoomMax: DefaultZoomMax,
+		zoomMax: GenericVisca.ranges.zoomMax,
 		httpEnabled: false,
 		httpUser: 'guest',
 		httpPort: DefaultHttpPort,
@@ -257,6 +301,8 @@ export function validateConfig(config: RawConfig): asserts config is PtzOpticsCo
 	config.host = toHost(config.host)
 	config.port = toPort(config.port)
 	config[DebugLoggingOptionId] = toDebugLogging(config[DebugLoggingOptionId])
+	const camera = cameraDefinition(config[CameraModelOptionId])
+	config[CameraModelOptionId] = camera.id
 	config[PollEnabledOptionId] = Boolean(config[PollEnabledOptionId] ?? false)
 	config[PollIntervalOptionId] = toBoundedInteger(
 		config[PollIntervalOptionId],
@@ -265,7 +311,10 @@ export function validateConfig(config: RawConfig): asserts config is PtzOpticsCo
 		DefaultPollInterval,
 	)
 	config[PollGroupsOptionId] = toPollGroups(config[PollGroupsOptionId])
-	config[ZoomMaxOptionId] = toBoundedInteger(config[ZoomMaxOptionId], 1, 0xffff, DefaultZoomMax)
+	// No position entered means the camera model's.
+	config[ZoomMaxOptionId] =
+		toBoundedInteger(config[ZoomMaxOptionId], ZoomMaxFromCameraModel, 0xffff, ZoomMaxFromCameraModel) ||
+		camera.ranges.zoomMax
 	config[HttpEnabledOptionId] = Boolean(config[HttpEnabledOptionId] ?? false)
 	config[HttpUserOptionId] = String(config[HttpUserOptionId] ?? 'guest')
 	config[HttpPortOptionId] = toBoundedInteger(config[HttpPortOptionId], 1, 65535, DefaultHttpPort)

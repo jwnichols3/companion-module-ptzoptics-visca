@@ -1,5 +1,6 @@
 import type { CompanionVariableValues } from '@companion-module/base'
 import { describe, expect, test } from 'vitest'
+import { GenericVisca } from '../cameras/index.js'
 import { PollGroupId, PollGroups } from './groups.js'
 import { pollVariableDefinitions, type PollTarget, StatusPoller } from './poller.js'
 import type { Answer, AnswerParameters, Inquiry } from '../visca/inquiry.js'
@@ -76,7 +77,7 @@ const allGroups = PollGroups.map((g) => g.id)
 function poller(target: FakeTarget, groups = allGroups): StatusPoller {
 	const p = new StatusPoller(target)
 	// Configure disabled so no timer runs; pollOnce is driven by the test.
-	p.configure({ enabled: false, interval: 1000, groups, zoomMax: 0x4000 })
+	p.configure({ enabled: false, interval: 1000, groups, camera: GenericVisca, zoomMax: 0x4000 })
 	return p
 }
 

@@ -9,6 +9,7 @@ import { getActions } from './actions/actions.js'
 import {
 	canUpdateConfigWithoutRestarting,
 	type RawConfig,
+	cameraDefinition,
 	getConfigFields,
 	httpPassword,
 	isValidHost,
@@ -442,6 +443,7 @@ export class PtzOpticsInstance extends InstanceBase<RawConfig, RawSecrets> imple
 			enabled: config.pollEnabled,
 			interval: config.pollInterval,
 			groups: config.pollGroups,
+			camera: cameraDefinition(config.cameraModel),
 			zoomMax: config.zoomMax,
 		})
 		this.#httpPoller.configure({

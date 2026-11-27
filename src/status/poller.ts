@@ -1,4 +1,5 @@
 import type { CompanionVariableDefinition, CompanionVariableValues, LogLevel } from '@companion-module/base'
+import { type CameraDefinition, GenericVisca } from '../cameras/index.js'
 import type { Answer, AnswerParameters, Inquiry } from '../visca/inquiry.js'
 import { type PolledInquiry, type PollGroupId, PollGroups } from './groups.js'
 
@@ -23,6 +24,8 @@ type PollSettings = {
 	/** Milliseconds between the end of one poll pass and the start of the next. */
 	readonly interval: number
 	readonly groups: readonly PollGroupId[]
+	/** What the camera supports: the groups choose within it. */
+	readonly camera: CameraDefinition
 	readonly zoomMax: number
 }
 
@@ -46,16 +49,27 @@ export function pollVariableDefinitions(groups: readonly PollGroupId[]): Compani
  * Periodically sends status inquiries to the camera and publishes the answers
  * as variable values, publishing only values that changed.
  *
+ * Only inquiries the camera definition has are sent, and of those only the
+ * ones in the selected groups.
+ *
  * An inquiry that fails in `RefusalsBeforeUnsupported` passes in a row, while
  * other inquiries in those passes succeed, is assumed unsupported by this
  * camera and is dropped until settings change.  If every inquiry in a pass
  * fails, the camera is probably unreachable, so that pass counts against
- * nothing.  While the camera reports standby, only power is polled.  A pass
- * ends early if the connection is lost.
+ * nothing.  Once the camera reports standby in a pass, only the inquiries the
+ * definition says it answers in standby are sent in the rest of that pass,
+ * and no failure in that pass counts against anything.  A pass ends early if
+ * the connection is lost.
  */
 export class StatusPoller {
 	readonly #target: PollTarget
-	#settings: PollSettings = { enabled: false, interval: 1000, groups: [], zoomMax: 0x4000 }
+	#settings: PollSettings = {
+		enabled: false,
+		interval: 1000,
+		groups: [],
+		camera: GenericVisca,
+		zoomMax: GenericVisca.ranges.zoomMax,
+	}
 	#inquiries: PolledInquiry[] = []
 	#unsupported = new Set<string>()
 	/** How many passes in a row each inquiry has failed in, if any. */
@@ -74,7 +88,9 @@ export class StatusPoller {
 	configure(settings: PollSettings): void {
 		this.stop()
 		this.#settings = settings
-		this.#inquiries = PollGroups.filter((g) => settings.groups.includes(g.id)).flatMap((g) => g.inquiries)
+		this.#inquiries = PollGroups.filter((g) => settings.groups.includes(g.id))
+			.flatMap((g) => g.inquiries)
+			.filter(({ id }) => settings.camera.supported.includes(id))
 		this.#unsupported.clear()
 		this.#refusals.clear()
 		this.#lastValues.clear()
@@ -112,14 +128,17 @@ export class StatusPoller {
 	async pollOnce(): Promise<void> {
 		if (!this.#target.canPoll()) return
 
-		const ctx = { zoomMax: this.#settings.zoomMax }
+		const { camera, zoomMax } = this.#settings
+		const ctx = { zoomMax }
 		const failed: PolledInquiry[] = []
 		let succeeded = 0
 		const changed: CompanionVariableValues = {}
 		let anyChanged = false
+		let standby = false
 
 		for (const polled of this.#inquiries) {
 			if (this.#unsupported.has(polled.id)) continue
+			if (standby && !camera.standby.includes(polled.id)) continue
 
 			const result = await this.#target.inquire(polled.inquiry)
 			if (result === null) {
@@ -143,12 +162,12 @@ export class StatusPoller {
 				}
 			}
 
-			// A camera in standby refuses most inquiries.  Skip the rest of the
-			// pass rather than mistake them for unsupported.
-			if (values['power'] === 'standby') break
+			// A camera in standby may refuse most inquiries.  Skip those in the
+			// rest of the pass rather than mistake them for unsupported.
+			if (values['power'] === 'standby') standby = true
 		}
 
-		if (succeeded > 0) {
+		if (succeeded > 0 && !standby) {
 			for (const { id } of failed) {
 				const refusals = (this.#refusals.get(id) ?? 0) + 1
 				this.#refusals.set(id, refusals)

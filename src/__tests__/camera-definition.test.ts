@@ -39,6 +39,19 @@ function cameraAnsweringEverything() {
 	return camera.replies
 }
 
+/** The zoom position the captured camera reports in the given power state. */
+function capturedZoom(power: 'on' | 'standby'): number {
+	const answer = cameraAnsweringEverything()[power].replies.find(
+		({ inquiry }) => String(inquiry) === String(ZoomPositionInquiryBytes),
+	)
+	if (answer === undefined) {
+		throw new Error('The captures of the PTZOptics camera lack the zoom position')
+	}
+	// `90 50 0p 0q 0r 0s FF`
+	const [, , p, q, r, s] = answer.reply
+	return (p << 12) | (q << 8) | (r << 4) | s
+}
+
 function inquiriesReceived(camera: SimulatedCamera): Set<string> {
 	return new Set(camera.received.map((message: Bytes) => String(message)))
 }
@@ -101,8 +114,7 @@ describe('camera model other than Generic VISCA', () => {
 
 			expect(inquiriesReceived(camera)).toEqual(new Set([PowerInquiryBytes, ZoomPositionInquiryBytes].map(String)))
 			expect(module.variable('power')).toBe('standby')
-			// The captured camera reports its zoom position as 0 in standby.
-			expect(module.variable('zoom')).toBe(0)
+			expect(module.variable('zoom')).toBe(capturedZoom('standby'))
 			expect(module.statuses).toEqual([InstanceStatus.Connecting, InstanceStatus.Ok])
 		} finally {
 			await module.destroy()
@@ -125,10 +137,11 @@ describe('camera model other than Generic VISCA', () => {
 				expect(module.variable('zoom')).toBeTypeOf('number')
 			})
 
-			// 9% of the definition's range of 0x2000, where it would be 5%
-			// of the Generic VISCA range of 0x4000.
-			expect(module.variable('zoom')).toBe(0x02fb)
-			expect(module.variable('zoom_pct')).toBe(9)
+			// A percentage of the definition's range of 0x2000, twice what it
+			// would be of the Generic VISCA range of 0x4000.
+			const zoom = capturedZoom('on')
+			expect(module.variable('zoom')).toBe(zoom)
+			expect(module.variable('zoom_pct')).toBe(Math.min(100, Math.round((100 * zoom) / 0x2000)))
 		} finally {
 			await module.destroy()
 			await camera.stop()

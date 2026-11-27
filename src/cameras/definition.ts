@@ -32,6 +32,13 @@ export type CameraDefinition = {
 		readonly zoomMax: number
 	}
 
+	/**
+	 * How many milliseconds the camera may take, after it acknowledges being
+	 * told to power on, to answer anything again.  A camera may answer nothing
+	 * as it wakes, and may refuse connections.
+	 */
+	readonly wakeWindowMs: number
+
 	/** Known oddities in how the camera answers, each with the capture that shows it. */
 	readonly quirks: readonly {
 		readonly name: string

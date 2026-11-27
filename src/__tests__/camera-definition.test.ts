@@ -24,6 +24,7 @@ vi.mock(import('../cameras/index.js'), async (importOriginal) => {
 		supported: ['power', 'pan-tilt', 'zoom', 'exposure-mode'],
 		standby: ['power', 'zoom'],
 		ranges: { zoomMax: 0x2000 },
+		wakeWindowMs: 60_000,
 		quirks: [],
 		captures: [],
 	}

@@ -17,3 +17,14 @@ Run `yarn dev` to compile module code, then watch for changes to automatically r
 This module exists to support PTZOptics cameras, first and foremost. G3 series cameras are probably most supported, because that's what the module maintainer uses himself. G2 series cameras are expected to work reasonably well, too, but they're less well-tested and so we rely on user testing to ensure support.
 
 This module uses VISCA over TCP/IP to control cameras. This protocol, initially developed by Sony, is implemented by many manufacturers for many different cameras. But cameras often implement it in subtly different form. This module attempts to enable support for non-PTZOptics cameras. But when such support would be incompatible with PTZOptics cameras -- for example, if a camera uses a different byte sequence for a command than PTZOptics cameras do -- the module will only support the PTZOptics mechanism. Users who use non-PTZOptics cameras are expected to use the "Custom command" action to work around this.
+
+## Adding a camera model
+
+The **Camera model** setting chooses a camera definition: which status inquiries the camera answers when on and in standby, its zoom range, and how long it takes to wake. A new definition is accepted only with:
+
+- a capture of the camera **on** and a capture of it in **standby**, recorded by `tools/capture-camera.mjs` and saved unedited as `src/cameras/captures/<camera>/on.json` and `standby.json`;
+- the camera's **model** and **firmware** in each capture (`--model` and `--firmware`).
+
+A capture of the camera waking (`--state waking --allow-power`, saved as `waking.json`) is welcome too: the wake window comes from it.
+
+Then add the definition in `src/cameras/` and list it in `src/cameras/index.ts`. `yarn test` checks every definition against its captures and says where they disagree, and runs the whole-module scenarios against every camera that has captures.

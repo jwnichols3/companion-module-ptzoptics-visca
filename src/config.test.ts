@@ -90,6 +90,18 @@ describe('camera model config option', () => {
 		expect(field).toHaveProperty('choices[0]', { id: 'generic-visca', label: 'Generic VISCA' })
 	})
 
+	test('the PTZOptics 20X (F64.HI) can be chosen, and stays chosen', () => {
+		const field = getConfigFields().find(({ id }) => id === CameraModelOptionId)
+		expect(field).toHaveProperty(
+			'choices',
+			expect.arrayContaining([{ id: 'ptzoptics-20x-f64hi', label: 'PTZOptics 20X (F64.HI)' }]),
+		)
+
+		const config: RawConfig = { host: '127.0.0.1', port: '5678', cameraModel: 'ptzoptics-20x-f64hi' }
+		validateConfig(config)
+		expect(config.cameraModel).toBe('ptzoptics-20x-f64hi')
+	})
+
 	test('a missing or unknown camera model is Generic VISCA', () => {
 		const configMissingCameraModel: RawConfig = { host: '127.0.0.1', port: '5678' }
 		validateConfig(configMissingCameraModel)

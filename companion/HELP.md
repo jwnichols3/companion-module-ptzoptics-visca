@@ -24,7 +24,7 @@ Turn on **Poll camera status** in the connection settings to have the module ask
 
 `pt_speed` (the pan/tilt speed movement actions use) is always available. The camera can't report it, so the module publishes its own setting.
 
-**Camera model** tells the module which of these the camera can answer, so it never asks for the rest. Leave it at **Generic VISCA** if your camera isn't listed: the module then asks for everything in the groups you chose, and if the camera doesn't answer one of these inquiries, logs it once and stops asking for that value. While a Generic VISCA camera is in standby, only `power` is polled.
+**Camera model** tells the module which of these the camera can answer, so it never asks for the rest. Leave it at **Generic VISCA** if your camera isn't listed: the module then asks for everything in the groups you chose, and if the camera doesn't answer one of these inquiries, logs it once and stops asking for that value. While a Generic VISCA camera is in standby, only `power` is polled. A **PTZOptics 20X (F64.HI)** answers everything in standby too, so everything you chose goes on being polled: positions then show where the camera is parked.
 
 `zoom_pct` needs the zoom position at full telephoto. Leave that setting at 0 to use the position for the camera model (16384 for Generic VISCA), or enter your camera's own.
 

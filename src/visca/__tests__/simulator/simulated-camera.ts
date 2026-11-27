@@ -31,6 +31,17 @@ type SimulatedCameraOptions = {
 const PowerOnBytes = [0x81, 0x01, 0x04, 0x00, 0x02, 0xff]
 const PowerStandbyBytes = [0x81, 0x01, 0x04, 0x00, 0x03, 0xff]
 
+/** Something the camera does wrong with one reply. */
+type ReplyFault =
+	| {
+			/** How many milliseconds late to send the reply. */
+			readonly late: number
+	  }
+	| {
+			/** The bytes to send in place of the reply. */
+			readonly garbled: Bytes
+	  }
+
 /** The socket number the simulated camera uses in every ACK and Completion. */
 const Socket = 1
 
@@ -41,7 +52,9 @@ function sameBytes(b1: Bytes, b2: Bytes): boolean {
 /**
  * A stand-in camera: a local TCP server that holds power state, answers each
  * inquiry with the reply given for its current power state, acknowledges and
- * completes every command, and records every message it receives.
+ * completes every command, and records every message it receives.  It can
+ * also be told to misbehave: to refuse or drop connections, to stall, and to
+ * send a reply late or garbled.
  *
  * Where `RunCameraInteractionTest` scripts one exact exchange with a
  * `VISCAPort`, this keeps answering for as long as it's asked, so that a whole
@@ -52,6 +65,13 @@ export class SimulatedCamera {
 	readonly #sockets = new Set<net.Socket>()
 	readonly #replies: CameraReplies
 	#power: CameraPowerState
+
+	/** What to do wrong with the replies to the next messages received, in order. */
+	readonly #replyFaults: ReplyFault[] = []
+
+	/** Messages received during a stall and not yet acted on, if stalled. */
+	#stalled: { readonly socket: net.Socket; readonly message: Bytes }[] | null = null
+	#stallTimer: ReturnType<typeof setTimeout> | null = null
 
 	/** The TCP port the camera is listening on, on `127.0.0.1`. */
 	readonly port: number
@@ -87,7 +107,11 @@ export class SimulatedCamera {
 					pending = pending.slice(terminator + 1)
 
 					this.received.push(message)
-					socket.write(new Uint8Array(this.#replyTo(message)))
+					if (this.#stalled !== null) {
+						this.#stalled.push({ socket, message })
+					} else {
+						this.#answer(socket, message)
+					}
 				}
 			})
 		})
@@ -118,8 +142,73 @@ export class SimulatedCamera {
 		return this.#power
 	}
 
+	/**
+	 * Stop listening, so that attempts to connect are refused, as when the
+	 * camera is off the network.  Connections already made stay open.
+	 */
+	refuseConnections(): void {
+		this.#server.close()
+	}
+
+	/** Listen again on the same port after `refuseConnections()`. */
+	async acceptConnections(): Promise<void> {
+		return new Promise((resolve: () => void, reject: (err: Error) => void) => {
+			this.#server.once('error', reject)
+			this.#server.listen(this.port, '127.0.0.1', () => {
+				this.#server.off('error', reject)
+				resolve()
+			})
+		})
+	}
+
+	/** Close every connection to the camera, as when it loses power. */
+	dropConnection(): void {
+		for (const socket of this.#sockets) {
+			socket.destroy()
+		}
+	}
+
+	/**
+	 * Stop acting on and replying to messages for the given number of
+	 * milliseconds, then act on everything received meanwhile, in order.
+	 */
+	stall(ms: number): void {
+		this.#stalled ??= []
+		if (this.#stallTimer !== null) {
+			clearTimeout(this.#stallTimer)
+		}
+		this.#stallTimer = setTimeout(() => {
+			const stalled = this.#stalled ?? []
+			this.#stalled = null
+			this.#stallTimer = null
+			for (const { socket, message } of stalled) {
+				this.#answer(socket, message)
+			}
+		}, ms)
+	}
+
+	/**
+	 * Send the reply to the next message received the given number of
+	 * milliseconds late.  Replies to later messages aren't held up behind it.
+	 */
+	replyLate(ms: number): void {
+		this.#replyFaults.push({ late: ms })
+	}
+
+	/**
+	 * Send the given bytes in place of the reply to the next message received.
+	 * The camera still acts on the message.
+	 */
+	replyGarbled(bytes: Bytes): void {
+		this.#replyFaults.push({ garbled: bytes })
+	}
+
 	/** Close every connection to the camera and stop listening. */
 	async stop(): Promise<void> {
+		if (this.#stallTimer !== null) {
+			clearTimeout(this.#stallTimer)
+			this.#stallTimer = null
+		}
 		for (const socket of this.#sockets) {
 			socket.destroy()
 		}
@@ -128,6 +217,29 @@ export class SimulatedCamera {
 				resolve()
 			})
 		})
+	}
+
+	/** Act on one received message and reply to it, misbehaving as instructed. */
+	#answer(socket: net.Socket, message: Bytes): void {
+		const reply = this.#replyTo(message)
+
+		const send = (bytes: Bytes) => {
+			// The connection may have been dropped since the message arrived.
+			if (!socket.destroyed) {
+				socket.write(new Uint8Array(bytes))
+			}
+		}
+
+		const fault = this.#replyFaults.shift()
+		if (fault === undefined) {
+			send(reply)
+		} else if ('late' in fault) {
+			setTimeout(() => {
+				send(reply)
+			}, fault.late)
+		} else {
+			send(fault.garbled)
+		}
 	}
 
 	/** Act on one received message, returning the bytes to send in reply. */

@@ -64,6 +64,15 @@ type SimulatedCameraOptions = {
 	 * shorten a wake-up that took a real camera half a minute.  1 if omitted.
 	 */
 	readonly wakeUpSpeed?: number
+	/** The address to listen on.  `127.0.0.1` if omitted. */
+	readonly host?: string
+	/** The TCP port to listen on.  One the OS chooses if omitted. */
+	readonly port?: number
+	/**
+	 * Called with a line of text for each message the camera receives and
+	 * each change in its state, for a person to read.
+	 */
+	readonly log?: (line: string) => void
 }
 
 const PowerOnBytes = [0x81, 0x01, 0x04, 0x00, 0x02, 0xff]
@@ -82,6 +91,11 @@ type ReplyFault =
 
 /** The socket number the simulated camera uses in every ACK and Completion. */
 const Socket = 1
+
+/** Write bytes the way a capture does (`90 50 02 FF`). */
+function hex(bytes: Bytes): string {
+	return bytes.map((byte) => byte.toString(16).toUpperCase().padStart(2, '0')).join(' ')
+}
 
 function sameBytes(b1: Bytes, b2: Bytes): boolean {
 	return b1.length === b2.length && b1.every((b, i) => b === b2[i])
@@ -111,6 +125,8 @@ export class SimulatedCamera {
 	#answers: StateReplies
 
 	readonly #wakeUpSpeed: number
+	readonly #host: string
+	readonly #log: (line: string) => void
 
 	/** Timers for the steps not yet done of a wake-up in progress. */
 	#wakeUpTimers: ReturnType<typeof setTimeout>[] = []
@@ -128,14 +144,20 @@ export class SimulatedCamera {
 	/** Whether the camera is ignoring every message it receives. */
 	#silent = false
 
-	/** The TCP port the camera is listening on, on `127.0.0.1`. */
+	/** The TCP port the camera is listening on. */
 	readonly port: number
 
 	/** Every message the camera has received, oldest first. */
 	readonly received: Bytes[] = []
 
-	private constructor(server: net.Server, port: number, { power, replies, wakeUpSpeed = 1 }: SimulatedCameraOptions) {
+	private constructor(
+		server: net.Server,
+		port: number,
+		{ power, replies, wakeUpSpeed = 1, host = '127.0.0.1', log = () => {} }: SimulatedCameraOptions,
+	) {
 		this.#server = server
+		this.#host = host
+		this.#log = log
 		this.port = port
 		this.#power = power
 		this.#replies = replies
@@ -164,6 +186,7 @@ export class SimulatedCamera {
 					pending = pending.slice(terminator + 1)
 
 					this.received.push(message)
+					this.#log(`received ${hex(message)}`)
 					if (this.#silent) {
 						// Received, and never answered.
 					} else if (this.#stalled !== null) {
@@ -176,7 +199,7 @@ export class SimulatedCamera {
 		})
 	}
 
-	/** Start a camera listening on a port the OS chooses. */
+	/** Start a camera listening, on `127.0.0.1` and a port the OS chooses unless told otherwise. */
 	static async start(options: SimulatedCameraOptions): Promise<SimulatedCamera> {
 		return new Promise((resolve: (camera: SimulatedCamera) => void, reject: (err: Error) => void) => {
 			const server = net.createServer({ noDelay: true })
@@ -184,7 +207,7 @@ export class SimulatedCamera {
 			server.on('error', reject)
 
 			const randomlyChosenPort = 0
-			server.listen(randomlyChosenPort, '127.0.0.1', () => {
+			server.listen(options.port ?? randomlyChosenPort, options.host ?? '127.0.0.1', () => {
 				const addr = server.address()
 				if (typeof addr === 'string' || addr === null) {
 					reject(new Error('server not running on an IP socket?'))
@@ -213,7 +236,7 @@ export class SimulatedCamera {
 	async acceptConnections(): Promise<void> {
 		return new Promise((resolve: () => void, reject: (err: Error) => void) => {
 			this.#server.once('error', reject)
-			this.#server.listen(this.port, '127.0.0.1', () => {
+			this.#server.listen(this.port, this.#host, () => {
 				this.#server.off('error', reject)
 				resolve()
 			})
@@ -338,6 +361,9 @@ export class SimulatedCamera {
 						this.#wakeUp()
 					}
 				} else if (sameBytes(message, PowerStandbyBytes)) {
+					if (this.#power === 'on') {
+						this.#log('power standby')
+					}
 					this.#abandonWakeUp()
 					this.#power = 'standby'
 					this.#answers = this.#replies.standby
@@ -358,25 +384,32 @@ export class SimulatedCamera {
 		const { wakeUp = [], on } = this.#replies
 		if (wakeUp.length === 0) {
 			this.#answers = on
+			this.#log('power on')
 			return
 		}
 
+		const takesMs = (wakeUp.at(-1)?.atMs ?? 0) / this.#wakeUpSpeed
+		this.#log(`power on: waking for ${(takesMs / 1000).toFixed(1)} s`)
+
 		for (const step of wakeUp) {
+			const stepDone = () => {
+				this.#wakeUpStep(step)
+				if (step === wakeUp.at(-1)) {
+					this.#log('awake')
+				}
+			}
 			// What the camera does at once, it does before it answers
 			// anything more.
 			if (step.atMs === 0) {
-				this.#wakeUpStep(step)
+				stepDone()
 				continue
 			}
-			this.#wakeUpTimers.push(
-				setTimeout(() => {
-					this.#wakeUpStep(step)
-				}, step.atMs / this.#wakeUpSpeed),
-			)
+			this.#wakeUpTimers.push(setTimeout(stepDone, step.atMs / this.#wakeUpSpeed))
 		}
 	}
 
 	#wakeUpStep(step: WakeUpStep): void {
+		this.#log(`waking: ${step.does}`)
 		switch (step.does) {
 			case 'goes-silent':
 				this.#silent = true

@@ -5,3 +5,4 @@ node_modules/
 /dist
 DEBUG-PACKAGED
 /.yarn
+/tools/.sim-camera

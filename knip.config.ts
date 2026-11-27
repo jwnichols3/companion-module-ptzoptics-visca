@@ -1,7 +1,11 @@
 import type { KnipConfig } from 'knip'
 
 const config: KnipConfig = {
-	entry: ['src/main.ts'],
+	entry: [
+		'src/main.ts',
+		// Run by `tools/sim-camera.mjs`.
+		'src/visca/__tests__/simulator/service.ts',
+	],
 	project: ['src/**/*.ts'],
 	ignoreDependencies: [
 		// This is used by n/* lint rules which Knip doesn't seem to be smart

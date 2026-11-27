@@ -1,0 +1,12 @@
+{
+	"extends": "../tsconfig.build.json",
+	"files": ["../src/visca/__tests__/simulator/service.ts"],
+	"include": [],
+	"exclude": [],
+	"compilerOptions": {
+		"rootDir": "../src",
+		"outDir": "./.sim-camera",
+		"declaration": false,
+		"sourceMap": false
+	}
+}

@@ -11,6 +11,8 @@ const FocusModeInquiryBytes = [0x81, 0x09, 0x04, 0x38, 0xff]
 
 /** A camera the simulated camera can play. */
 type Camera = {
+	/** Names the camera on the command line of the simulated camera service. */
+	readonly id: string
 	/** Names the camera in test titles. */
 	readonly name: string
 	readonly replies: CameraReplies
@@ -175,6 +177,7 @@ function capturedCameras(): Camera[] {
 			const standby = capture('standby')
 			const waking = capture('waking')
 			return {
+				id: name,
 				name: `${name} (captured)`,
 				replies: {
 					on: stateReplies(readCapture<StateCapture>(on).exchanges, on),
@@ -197,6 +200,7 @@ function capturedCameras(): Camera[] {
  * it's told to be.
  */
 export const HandWrittenCamera: Camera = {
+	id: 'refuses-inquiries-in-standby',
 	name: 'refuses inquiries in standby (hand-written, not captured)',
 	replies: {
 		on: {

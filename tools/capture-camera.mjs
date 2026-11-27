@@ -11,6 +11,9 @@
 // `--power-off` (also requiring `--allow-power`) sends Power Off and exits.
 //
 // The capture contains no address or hostname.
+//
+// Captures saved as src/cameras/captures/<camera>/{on,standby,waking}.json can
+// be played back to a real Companion by `tools/sim-camera.mjs`.
 import net from 'node:net'
 import { writeFileSync } from 'node:fs'
 

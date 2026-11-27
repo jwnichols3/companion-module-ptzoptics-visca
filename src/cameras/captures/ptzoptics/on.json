@@ -1,0 +1,157 @@
+{
+	"camera": {
+		"brand": "PTZOptics",
+		"model": "unknown",
+		"firmware": null,
+		"versionReply": "90 50 00 01 00 00 00 00 53 FF"
+	},
+	"state": "on",
+	"capturedAt": "2026-11-27",
+	"scriptVersion": 1,
+	"exchanges": [
+		{
+			"name": "power",
+			"sent": "81 09 04 00 FF",
+			"received": "90 50 02 FF",
+			"ms": 20
+		},
+		{
+			"name": "pan-tilt",
+			"sent": "81 09 06 12 FF",
+			"received": "90 50 0F 0E 08 0A 0F 0F 0B 03 FF",
+			"ms": 21
+		},
+		{
+			"name": "zoom",
+			"sent": "81 09 04 47 FF",
+			"received": "90 50 00 02 0F 0B FF",
+			"ms": 23
+		},
+		{
+			"name": "focus",
+			"sent": "81 09 04 48 FF",
+			"received": "90 50 01 01 02 0D FF",
+			"ms": 21
+		},
+		{
+			"name": "focus-mode",
+			"sent": "81 09 04 38 FF",
+			"received": "90 50 02 FF",
+			"ms": 23
+		},
+		{
+			"name": "exposure-mode",
+			"sent": "81 09 04 39 FF",
+			"received": "90 50 00 FF",
+			"ms": 25
+		},
+		{
+			"name": "iris",
+			"sent": "81 09 04 4B FF",
+			"received": "90 50 00 00 01 01 FF",
+			"ms": 21
+		},
+		{
+			"name": "shutter",
+			"sent": "81 09 04 4A FF",
+			"received": "90 50 00 00 00 05 FF",
+			"ms": 21
+		},
+		{
+			"name": "gain",
+			"sent": "81 09 04 4C FF",
+			"received": "90 50 00 00 00 02 FF",
+			"ms": 23
+		},
+		{
+			"name": "brightness",
+			"sent": "81 09 04 4D FF",
+			"received": "90 50 00 00 00 07 FF",
+			"ms": 20
+		},
+		{
+			"name": "wb-mode",
+			"sent": "81 09 04 35 FF",
+			"received": "90 50 00 FF",
+			"ms": 23
+		},
+		{
+			"name": "wb-red",
+			"sent": "81 09 04 43 FF",
+			"received": "90 50 00 00 07 08 FF",
+			"ms": 23
+		},
+		{
+			"name": "wb-blue",
+			"sent": "81 09 04 44 FF",
+			"received": "90 50 00 00 08 02 FF",
+			"ms": 20
+		},
+		{
+			"name": "flip",
+			"sent": "81 09 04 66 FF",
+			"received": "90 50 03 FF",
+			"ms": 22
+		},
+		{
+			"name": "mirror",
+			"sent": "81 09 04 61 FF",
+			"received": "90 50 03 FF",
+			"ms": 20
+		},
+		{
+			"name": "color-temperature",
+			"sent": "81 09 04 20 FF",
+			"received": "90 50 28 FF",
+			"ms": 20
+		},
+		{
+			"name": "red-tuning",
+			"sent": "81 09 04 12 FF",
+			"received": "90 50 00 00 00 0D FF",
+			"ms": 20
+		},
+		{
+			"name": "blue-tuning",
+			"sent": "81 09 04 13 FF",
+			"received": "90 50 00 00 00 0B FF",
+			"ms": 23
+		},
+		{
+			"name": "saturation",
+			"sent": "81 09 04 49 FF",
+			"received": "90 50 00 00 00 04 FF",
+			"ms": 24
+		},
+		{
+			"name": "hue",
+			"sent": "81 09 04 4F FF",
+			"received": "90 50 00 00 00 07 FF",
+			"ms": 21
+		},
+		{
+			"name": "contrast",
+			"sent": "81 09 04 A2 FF",
+			"received": "90 50 00 00 00 07 FF",
+			"ms": 21
+		},
+		{
+			"name": "luminance",
+			"sent": "81 09 04 A1 FF",
+			"received": "90 50 00 00 00 07 FF",
+			"ms": 25
+		},
+		{
+			"name": "sharpness",
+			"sent": "81 09 04 42 FF",
+			"received": "90 50 00 00 00 04 FF",
+			"ms": 16
+		},
+		{
+			"name": "exposure-compensation",
+			"sent": "81 09 04 4E FF",
+			"received": "90 50 00 00 00 06 FF",
+			"ms": 41
+		}
+	]
+}

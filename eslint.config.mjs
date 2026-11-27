@@ -5,6 +5,8 @@ import { generateEslintConfig } from '@companion-module/tools/eslint/config.mjs'
 const baseConfig = await generateEslintConfig({
 	enableJest: true,
 	enableTypescript: true,
+	// Standalone scripts, run directly by Node and not part of the module.
+	ignores: ['tools/*'],
 })
 
 const permittedUnpublishedImports = [

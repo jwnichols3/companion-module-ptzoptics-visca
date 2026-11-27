@@ -9,10 +9,11 @@ export interface PollTarget {
 	canPoll(): boolean
 	/**
 	 * Send an inquiry, without logging.  Resolves its answer; an error if the
-	 * camera answered anything else; or null if the connection was lost
-	 * before an answer came.
+	 * camera answered anything else; `'unanswered'` if the camera was sent
+	 * the inquiry and answered nothing in time; or null if the connection was
+	 * lost before the inquiry could be sent or an answer came.
 	 */
-	inquire(inquiry: Inquiry<AnswerParameters>): Promise<Answer<AnswerParameters> | Error | null>
+	inquire(inquiry: Inquiry<AnswerParameters>): Promise<Answer<AnswerParameters> | Error | 'unanswered' | null>
 	setVariableValues(values: CompanionVariableValues): void
 	/** Called after each pass with whether the camera answered anything. */
 	passCompleted(answered: boolean): void
@@ -36,9 +37,16 @@ export const FastPollIntervalMs = 200
 /**
  * How many passes in a row the camera must fail to answer an inquiry, while
  * answering others, before the inquiry is taken as unsupported.  More than
- * one, so that a single garbled reply costs nothing.
+ * one, so that a single garbled or lost reply costs nothing.
  */
 const RefusalsBeforeUnsupported = 3
+
+/**
+ * How long after the camera is first seen on its refusals count for nothing.
+ * A camera that has just woken may say it's on and still refuse, for a few
+ * passes, inquiries it answers once fully awake.
+ */
+export const WakingWindowMs = 10_000
 
 /** Variables for the selected poll groups. */
 export function pollVariableDefinitions(groups: readonly PollGroupId[]): CompanionVariableDefinition[] {
@@ -54,12 +62,22 @@ export function pollVariableDefinitions(groups: readonly PollGroupId[]): Compani
  *
  * An inquiry that fails in `RefusalsBeforeUnsupported` passes in a row, while
  * other inquiries in those passes succeed, is assumed unsupported by this
- * camera and is dropped until settings change.  If every inquiry in a pass
- * fails, the camera is probably unreachable, so that pass counts against
- * nothing.  Once the camera reports standby in a pass, only the inquiries the
+ * camera and is dropped until settings change.  An inquiry fails if the
+ * camera refuses it, answering something that isn't its answer, or leaves it
+ * unanswered.  If every inquiry in a pass fails, the camera is probably
+ * unreachable, so that pass counts against nothing.  Nor does losing the
+ * connection count against the inquiry that was waiting on it.
+ *
+ * Once the camera reports standby in a pass, only the inquiries the
  * definition says it answers in standby are sent in the rest of that pass,
- * and no failure in that pass counts against anything.  A pass ends early if
- * the connection is lost.
+ * and no refusal in that pass counts against anything.  Nor does a refusal
+ * while the camera is waking: until it has been seen on for `WakingWindowMs`
+ * since it connected, or since it left standby.
+ *
+ * A pass ends early if an inquiry goes unanswered or the connection is lost.
+ * An inquiry that went unanswered is asked last in later passes, until it's
+ * answered, so that a camera that ignores it can still show, by answering
+ * the others first, that it's there.
  */
 export class StatusPoller {
 	readonly #target: PollTarget
@@ -74,6 +92,14 @@ export class StatusPoller {
 	#unsupported = new Set<string>()
 	/** How many passes in a row each inquiry has failed in, if any. */
 	#refusals = new Map<string, number>()
+	/** The inquiries that went unanswered when last sent. */
+	#unanswered = new Set<string>()
+	/**
+	 * Whether the camera is known to be on, and for how long: `'waking'` from
+	 * when it's first seen on until `WakingWindowMs` later.
+	 */
+	#on: 'not-known' | 'waking' | 'awake' = 'not-known'
+	#wakingTimer: ReturnType<typeof setTimeout> | null = null
 	#lastValues = new Map<string, string | number | boolean | undefined>()
 	#timer: ReturnType<typeof setTimeout> | null = null
 	#running = false
@@ -93,6 +119,7 @@ export class StatusPoller {
 			.filter(({ id }) => settings.camera.supported.includes(id))
 		this.#unsupported.clear()
 		this.#refusals.clear()
+		this.#unanswered.clear()
 		this.#lastValues.clear()
 		if (settings.enabled && this.#inquiries.length > 0) {
 			this.#running = true
@@ -108,6 +135,32 @@ export class StatusPoller {
 			clearTimeout(this.#timer)
 			this.#timer = null
 		}
+		this.#notKnownOn()
+	}
+
+	/**
+	 * Note that a new connection to the camera was made.  The camera may have
+	 * restarted meanwhile, so it's waking again once it's seen on.
+	 */
+	noteConnected(): void {
+		this.#notKnownOn()
+	}
+
+	#notKnownOn(): void {
+		this.#on = 'not-known'
+		if (this.#wakingTimer !== null) {
+			clearTimeout(this.#wakingTimer)
+			this.#wakingTimer = null
+		}
+	}
+
+	#seenOn(): void {
+		if (this.#on !== 'not-known') return
+		this.#on = 'waking'
+		this.#wakingTimer = setTimeout(() => {
+			this.#wakingTimer = null
+			this.#on = 'awake'
+		}, WakingWindowMs)
 	}
 
 	/**
@@ -130,29 +183,37 @@ export class StatusPoller {
 
 		const { camera, zoomMax } = this.#settings
 		const ctx = { zoomMax }
-		const failed: PolledInquiry[] = []
+		const refused: PolledInquiry[] = []
+		let unanswered: PolledInquiry | null = null
+		let connectionLost = false
 		let succeeded = 0
 		const changed: CompanionVariableValues = {}
 		let anyChanged = false
 		let standby = false
 
-		for (const polled of this.#inquiries) {
+		const inquiries = [
+			...this.#inquiries.filter(({ id }) => !this.#unanswered.has(id)),
+			...this.#inquiries.filter(({ id }) => this.#unanswered.has(id)),
+		]
+		for (const polled of inquiries) {
 			if (this.#unsupported.has(polled.id)) continue
 			if (standby && !camera.standby.includes(polled.id)) continue
 
 			const result = await this.#target.inquire(polled.inquiry)
-			if (result === null) {
+			if (result === null || result === 'unanswered') {
 				// The rest of the pass would only wait on the new connection.
-				failed.push(polled)
+				if (result === 'unanswered') unanswered = polled
+				connectionLost = true
 				break
 			}
 			if (result instanceof Error) {
-				failed.push(polled)
+				refused.push(polled)
 				continue
 			}
 
 			succeeded++
 			this.#refusals.delete(polled.id)
+			this.#unanswered.delete(polled.id)
 			const values = polled.toValues(result, ctx)
 			for (const [id, value] of Object.entries(values)) {
 				if (this.#lastValues.get(id) !== value) {
@@ -167,13 +228,28 @@ export class StatusPoller {
 			if (values['power'] === 'standby') standby = true
 		}
 
-		if (succeeded > 0 && !standby) {
+		if (standby || connectionLost) {
+			this.#notKnownOn()
+		} else if (succeeded > 0) {
+			this.#seenOn()
+		}
+
+		if (unanswered !== null) this.#unanswered.add(unanswered.id)
+
+		// Only a camera that answered something is there to have failed to
+		// answer something else.
+		if (succeeded > 0) {
+			const failed = [
+				...(unanswered !== null ? [unanswered] : []),
+				...(!standby && this.#on === 'awake' ? refused : []),
+			]
 			for (const { id } of failed) {
 				const refusals = (this.#refusals.get(id) ?? 0) + 1
 				this.#refusals.set(id, refusals)
 				if (refusals < RefusalsBeforeUnsupported) continue
 
 				this.#unsupported.add(id)
+				this.#unanswered.delete(id)
 				this.#target.log('info', `Camera didn't answer the "${id}" status inquiry; no longer polling it`)
 			}
 		}

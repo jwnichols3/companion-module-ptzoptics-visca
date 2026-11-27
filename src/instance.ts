@@ -74,6 +74,26 @@ export class PtzOpticsInstance extends InstanceBase<RawConfig, RawSecrets> imple
 	/** A port to use to communicate with the represented camera. */
 	#visca = new VISCAPort(this)
 
+	/** Whether the port has a connection to the camera now. */
+	#connected = false
+
+	/** How many connections to the camera the port has made, to tell one from the next. */
+	#connectionsMade = 0
+
+	/**
+	 * Report the connection status to Companion.  Only the port calls this,
+	 * and it reports ok when, and only when, it has made a connection: so
+	 * also keep track of the connection here.
+	 */
+	override updateStatus(status: InstanceStatus, message?: string | null): void {
+		this.#connected = status === InstanceStatus.Ok
+		if (this.#connected) {
+			this.#connectionsMade++
+			this.#poller.noteConnected()
+		}
+		super.updateStatus(status, message)
+	}
+
 	/** Polls the camera for status, if enabled in config. */
 	#poller = new StatusPoller({
 		canPoll: () => !this.#visca.closed,
@@ -104,8 +124,8 @@ export class PtzOpticsInstance extends InstanceBase<RawConfig, RawSecrets> imple
 
 	/**
 	 * Send an inquiry for the status poller.  If the camera doesn't answer it
-	 * within `InquiryTimeoutMs`, take the connection for lost and reconnect,
-	 * just as after a network error.
+	 * within `InquiryTimeoutMs` of its being sent, take the connection for
+	 * lost and reconnect, just as after a network error.
 	 *
 	 * A camera in standby refuses most inquiries with an error that doesn't
 	 * say which message it refuses, and the port attributes that error to a
@@ -115,10 +135,14 @@ export class PtzOpticsInstance extends InstanceBase<RawConfig, RawSecrets> imple
 	 * the inquiry is unanswered.
 	 *
 	 * @returns
-	 *    The answer; an error if the camera answered anything else; or null if
-	 *    the connection was lost before an answer came.
+	 *    The answer; an error if the camera answered anything else;
+	 *    `'unanswered'` if the camera was sent the inquiry and didn't answer
+	 *    it in time; or null if the connection was lost before the inquiry
+	 *    could be sent or an answer came.
 	 */
-	async #pollInquiry(inquiry: Inquiry<AnswerParameters>): Promise<Answer<AnswerParameters> | Error | null> {
+	async #pollInquiry(
+		inquiry: Inquiry<AnswerParameters>,
+	): Promise<Answer<AnswerParameters> | Error | 'unanswered' | null> {
 		// Don't count time spent waiting for a connection against the camera.
 		try {
 			await this.#visca.connect()
@@ -131,21 +155,40 @@ export class PtzOpticsInstance extends InstanceBase<RawConfig, RawSecrets> imple
 		}
 		await resolvedWithin(this.#visca.commandsAcknowledged(), OverlapWaitLimitMs)
 
+		// The connection may have been lost meanwhile.  The camera can't
+		// answer, or refuse, an inquiry that can't be sent to it.
+		if (!this.#connected) {
+			return null
+		}
+		const connection = this.#connectionsMade
+
 		const { promise: inquiryAnswered, resolve: inquiryNoLongerPending } = Promise.withResolvers<void>()
 		this.#polledInquiryAnswered = inquiryAnswered
 
+		// With a connection made, the port writes the inquiry's bytes to it
+		// before `sendInquiry` returns, so the camera's time starts now.
+		// A pending inquiry rejects when its connection closes.
+		const answered = this.#visca.sendInquiry(inquiry).catch(() => null)
 		let timer: ReturnType<typeof setTimeout> | undefined
-		const unanswered = new Promise<null>((resolve) => {
+		const unanswered = new Promise<'unanswered' | null>((resolve) => {
 			timer = setTimeout(() => {
+				// Leave alone a connection the inquiry wasn't sent on: the
+				// module may have been destroyed or given another camera
+				// since.
+				if (!this.#connected || connection !== this.#connectionsMade) {
+					resolve(null)
+					return
+				}
+
+				// Closing the connection rejects the inquiry, so settle on
+				// its being unanswered first.
+				resolve('unanswered')
 				this.log('warn', `Camera didn't answer a status inquiry within ${InquiryTimeoutMs} ms; reconnecting`)
 				this.#visca.close('Camera stopped answering', InstanceStatus.ConnectionFailure)
 				const { host, port } = this.#config
 				if (isValidHost(host)) this.#visca.open(host, port)
-				resolve(null)
 			}, InquiryTimeoutMs)
 		})
-		// A pending inquiry rejects when its connection closes.
-		const answered = this.#visca.sendInquiry(inquiry).catch(() => null)
 		return Promise.race([answered, unanswered]).finally(() => {
 			clearTimeout(timer)
 			this.#polledInquiryAnswered = null

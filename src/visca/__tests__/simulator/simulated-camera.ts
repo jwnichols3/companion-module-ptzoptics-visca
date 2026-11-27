@@ -313,6 +313,21 @@ export class SimulatedCamera {
 		this.#replyFaults.push({ garbled: bytes })
 	}
 
+	/**
+	 * Answer inquiries the given way from now on, whatever the power state,
+	 * until the power state next changes.
+	 */
+	answerAs(replies: StateReplies): void {
+		this.#answers = replies
+	}
+
+	/** Send the given bytes now, on every connection, though nothing asked for them. */
+	send(bytes: Bytes): void {
+		for (const socket of this.#sockets) {
+			socket.write(new Uint8Array(bytes))
+		}
+	}
+
 	/** Close every connection to the camera and stop listening. */
 	async stop(): Promise<void> {
 		this.#abandonWakeUp()

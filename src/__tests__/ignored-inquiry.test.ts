@@ -54,7 +54,7 @@ describe('camera ignores an inquiry, sending nothing in reply', () => {
 			...on,
 			replies: on.replies.map(({ inquiry, reply }) => ({
 				inquiry,
-				reply: String(inquiry) === String(PowerInquiryBytes) ? [] : reply,
+				reply: String(inquiry) === String(PowerInquiryBytes) ? null : reply,
 			})),
 		}
 		const camera = await SimulatedCamera.start({ power: 'on', replies: { on: ignoresPower, standby } })

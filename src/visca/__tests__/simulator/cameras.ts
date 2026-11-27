@@ -1,6 +1,7 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { CommandNotExecutable, SyntaxErrorBytes } from '../camera-interactions/bytes.js'
-import type { CameraReplies, WakeUpStep } from './simulated-camera.js'
+import type { CameraReplies, StateReplies, WakeUpStep } from './simulated-camera.js'
+import type { CameraPowerState } from '../../../camera/power.js'
 import type { Bytes } from '../../../utils/byte.js'
 
 export const PowerInquiryBytes = [0x81, 0x09, 0x04, 0x00, 0xff]
@@ -9,20 +10,26 @@ const ZoomPositionInquiryBytes = [0x81, 0x09, 0x04, 0x47, 0xff]
 const FocusPositionInquiryBytes = [0x81, 0x09, 0x04, 0x48, 0xff]
 const FocusModeInquiryBytes = [0x81, 0x09, 0x04, 0x38, 0xff]
 
-/** A camera the simulated camera can play. */
-type Camera = {
+/**
+ * A camera the simulated camera can play, in the power states it was
+ * recorded in.  `Recorded` names the states it's known to have been recorded
+ * in: none, unless told otherwise, so that its replies for a state can't be
+ * used without first finding that it has them.
+ */
+export type Camera<Recorded extends CameraPowerState = never> = {
 	/** Names the camera on the command line of the simulated camera service. */
 	readonly id: string
 	/** Names the camera in test titles. */
 	readonly name: string
-	readonly replies: CameraReplies
+	readonly replies: CameraReplies<Recorded>
 }
 
-/** One inquiry sent to a camera by `tools/capture-camera.mjs`, and its answer if one came. */
+/** One inquiry sent to a camera by `tools/capture-camera.mjs`, and its answer, and how long it took, if one came. */
 type CapturedExchange = {
 	readonly name: string
 	readonly sent: string
 	readonly received: string | null
+	readonly ms: number | null
 }
 
 /** A capture of a camera that's on or in standby, as much of it as is used here. */
@@ -68,20 +75,26 @@ function readCapture<Capture extends { readonly scriptVersion: number }>(file: U
 }
 
 /**
- * How a camera answered the inquiries of one pass.  The capture script asks
+ * How a camera answered the inquiries of one pass, and how long it took over
+ * each.  An inquiry the camera left unanswered is one it ignores: the
+ * simulated camera sends nothing in reply to it.  The capture script asks
  * only what the module can poll, so what the camera says to any other inquiry
  * wasn't recorded: assume a syntax error.
  */
-function stateReplies(exchanges: readonly CapturedExchange[], file: URL): CameraReplies['on'] {
+function stateReplies(exchanges: readonly CapturedExchange[]): StateReplies {
 	return {
-		replies: exchanges.map(({ name, sent, received }) => {
-			if (received === null) {
-				throw new Error(`${file.pathname}: no answer to "${name}", which the simulated camera can't yet play`)
-			}
-			return { inquiry: bytes(sent), reply: bytes(received) }
-		}),
+		replies: exchanges.map(({ sent, received, ms }) => ({
+			inquiry: bytes(sent),
+			reply: received === null ? null : bytes(received),
+			...(ms === null ? {} : { tookMs: ms }),
+		})),
 		otherwise: SyntaxErrorBytes,
 	}
+}
+
+/** How many inquiries the camera ignores in a power state, sending nothing in reply. */
+export function inquiriesIgnored({ replies }: StateReplies): number {
+	return replies.filter(({ reply }) => reply === null).length
 }
 
 /**
@@ -100,7 +113,7 @@ function stateReplies(exchanges: readonly CapturedExchange[], file: URL): Camera
  *    answer first came.
  *  - Answers that nothing asked for came with the first answer.
  */
-function wakeUpSteps({ timeline }: WakingCapture, file: URL): WakeUpStep[] {
+function wakeUpSteps({ timeline }: WakingCapture): WakeUpStep[] {
 	const steps: WakeUpStep[] = []
 
 	let silent = false
@@ -125,7 +138,7 @@ function wakeUpSteps({ timeline }: WakingCapture, file: URL): WakeUpStep[] {
 				steps.push({
 					atMs: silent ? (connectedAt ?? atMs) : atMs,
 					does: 'answers',
-					replies: stateReplies(entry.exchanges, file),
+					replies: stateReplies(entry.exchanges),
 					unsolicited,
 				})
 				silent = false
@@ -164,8 +177,10 @@ function wakeUpSteps({ timeline }: WakingCapture, file: URL): WakeUpStep[] {
 
 /**
  * The cameras that captures have been recorded from: one for each directory
- * of captures.  A camera needs captures of it on (`on.json`) and in standby
- * (`standby.json`); a capture of it waking (`waking.json`) is played back if
+ * of captures.  A camera is played on from the capture of it on (`on.json`)
+ * and in standby from the capture of it in standby (`standby.json`).  One
+ * recorded in only one of those states can be played only in that state, and
+ * its name says so.  A capture of it waking (`waking.json`) is played back if
  * there is one, and otherwise the camera is on as soon as it's told to be.
  */
 function capturedCameras(): Camera[] {
@@ -173,16 +188,21 @@ function capturedCameras(): Camera[] {
 		.filter((entry) => entry.isDirectory())
 		.map(({ name }) => {
 			const capture = (state: string) => new URL(`${name}/${state}.json`, CapturesDirectory)
-			const on = capture('on')
-			const standby = capture('standby')
+			const [on, standby] = [capture('on'), capture('standby')].map((file) =>
+				existsSync(file) ? stateReplies(readCapture<StateCapture>(file).exchanges) : undefined,
+			)
+			if (on === undefined && standby === undefined) {
+				throw new Error(`${capture('on').pathname}, ${capture('standby').pathname}: neither exists`)
+			}
 			const waking = capture('waking')
+			const only = on === undefined ? ' in standby only' : standby === undefined ? ' on only' : ''
 			return {
 				id: name,
-				name: `${name} (captured)`,
+				name: `${name} (captured${only})`,
 				replies: {
-					on: stateReplies(readCapture<StateCapture>(on).exchanges, on),
-					standby: stateReplies(readCapture<StateCapture>(standby).exchanges, standby),
-					...(existsSync(waking) ? { wakeUp: wakeUpSteps(readCapture<WakingCapture>(waking), waking) } : {}),
+					...(on === undefined ? {} : { on }),
+					...(standby === undefined ? {} : { standby }),
+					...(existsSync(waking) ? { wakeUp: wakeUpSteps(readCapture<WakingCapture>(waking)) } : {}),
 				},
 			}
 		})
@@ -199,7 +219,7 @@ function capturedCameras(): Camera[] {
  * them.  Nothing is known of how they wake, so this camera is on as soon as
  * it's told to be.
  */
-export const HandWrittenCamera: Camera = {
+export const HandWrittenCamera: Camera<CameraPowerState> = {
 	id: 'refuses-inquiries-in-standby',
 	name: 'refuses inquiries in standby (hand-written, not captured)',
 	replies: {
@@ -234,3 +254,11 @@ export const HandWrittenCamera: Camera = {
  * each: add a directory of captures and its camera is among them.
  */
 export const Cameras: readonly Camera[] = [...capturedCameras(), HandWrittenCamera]
+
+/** Whether the camera was recorded in every one of the given power states. */
+export function recordedIn<Recorded extends CameraPowerState>(
+	camera: Camera,
+	states: readonly Recorded[],
+): camera is Camera<Recorded> {
+	return states.every((state) => camera.replies[state] !== undefined)
+}

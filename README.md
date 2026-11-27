@@ -28,3 +28,5 @@ The **Camera model** setting chooses a camera definition: which status inquiries
 A capture of the camera waking (`--state waking --allow-power`, saved as `waking.json`) is welcome too: the wake window comes from it.
 
 Then add the definition in `src/cameras/` and list it in `src/cameras/index.ts`. `yarn test` checks every definition against its captures and says where they disagree, and runs the whole-module scenarios against every camera that has captures.
+
+Captures are welcome before a definition can be written: of a camera in only one power state, or with its model or firmware not yet known. Save them the same way. The scenarios then run against that camera in the state it was recorded in, and list as skipped the ones that need the other state. An inquiry the camera left unanswered is played back as it was: the simulated camera sends nothing in reply.

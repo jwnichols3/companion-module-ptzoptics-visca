@@ -1,10 +1,11 @@
 import { InstanceStatus } from '@companion-module/base'
-import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
+import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import { PowerActionId } from '../actions/power.js'
+import { describeEachCamera } from './each-camera.js'
 import { eventually } from './faked-time.js'
 import { ModuleUnderTest } from './module-under-test.js'
 import { CameraPowerBytes } from '../visca/__tests__/camera-interactions/bytes.js'
-import { Cameras, PowerInquiryBytes } from '../visca/__tests__/simulator/cameras.js'
+import { PowerInquiryBytes } from '../visca/__tests__/simulator/cameras.js'
 import { SimulatedCamera } from '../visca/__tests__/simulator/simulated-camera.js'
 
 const CameraStandbyBytes = [0x81, 0x01, 0x04, 0x00, 0x03, 0xff]
@@ -21,7 +22,7 @@ const WakeUpSpeed = 20
  */
 const Recovery = 10_000
 
-describe.each(Cameras)('camera on, sent to standby, then powered on: $name', ({ replies }) => {
+describeEachCamera('camera on, sent to standby, then powered on', ['on', 'standby'], ({ replies }) => {
 	// Fake only the timers, not the sockets, so that neither the waits between
 	// poll passes nor the wake-up take real time.
 	beforeEach(() => {

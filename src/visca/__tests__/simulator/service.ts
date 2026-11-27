@@ -15,8 +15,11 @@ export type Service = {
 	stop(): Promise<void>
 }
 
+/** The cameras by name, each with the one power state it can be played in if it was recorded in only one. */
 function cameraList(): string {
-	return ['cameras:', ...Cameras.map(({ id }) => `  ${id}`)].join('\n')
+	const only = ({ on, standby }: (typeof Cameras)[number]['replies']) =>
+		on === undefined ? ' (standby only)' : standby === undefined ? ' (on only)' : ''
+	return ['cameras:', ...Cameras.map(({ id, replies }) => `  ${id}${only(replies)}`)].join('\n')
 }
 
 /**
@@ -74,6 +77,9 @@ export async function startService(
 	if (power !== 'on' && power !== 'standby') {
 		throw new UsageError('--state must be on or standby')
 	}
+	if (camera.replies[power] === undefined) {
+		throw new UsageError(`${id} wasn't recorded ${power === 'on' ? 'on' : 'in standby'}`)
+	}
 	if (!Number.isInteger(port) || port < 0 || port > 65535) {
 		throw new UsageError('--port must be a port number')
 	}
@@ -122,7 +128,8 @@ export async function main(argv: readonly string[]): Promise<void> {
 
 	const stop = () => {
 		print(`${time()}stopping`)
-		void service.stop()
+		// A camera that gave up has said why already.
+		service.stop().catch(() => {})
 	}
 	process.once('SIGINT', stop)
 	process.once('SIGTERM', stop)

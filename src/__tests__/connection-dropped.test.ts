@@ -1,10 +1,11 @@
 import { InstanceStatus } from '@companion-module/base'
-import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
+import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import { PowerActionId } from '../actions/power.js'
+import { describeEachCamera } from './each-camera.js'
 import { eventually } from './faked-time.js'
 import { ModuleUnderTest } from './module-under-test.js'
 import { CameraPowerBytes } from '../visca/__tests__/camera-interactions/bytes.js'
-import { Cameras, PowerInquiryBytes } from '../visca/__tests__/simulator/cameras.js'
+import { PowerInquiryBytes } from '../visca/__tests__/simulator/cameras.js'
 import { SimulatedCamera } from '../visca/__tests__/simulator/simulated-camera.js'
 
 /** How long the module's socket waits after a failed attempt to connect before trying again. */
@@ -13,8 +14,9 @@ const ReconnectInterval = 2000
 /** Longer than the module is given to do anything in this test. */
 const Never = 60 * 60 * 1000
 
-describe.each(Cameras)(
-	'connection dropped in the middle of a poll, then the camera comes back: $name',
+describeEachCamera(
+	'connection dropped in the middle of a poll, then the camera comes back',
+	['on', 'standby'],
 	({ replies: { on, standby } }) => {
 		// How a camera wakes is for other scenarios: this one is on as soon as
 		// it's told to be.

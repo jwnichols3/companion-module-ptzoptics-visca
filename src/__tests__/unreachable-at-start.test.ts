@@ -1,17 +1,18 @@
 import { InstanceStatus } from '@companion-module/base'
-import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
+import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import { PowerActionId } from '../actions/power.js'
+import { describeEachCamera } from './each-camera.js'
 import { eventually } from './faked-time.js'
 import { ModuleUnderTest } from './module-under-test.js'
 import { CameraPowerBytes } from '../visca/__tests__/camera-interactions/bytes.js'
-import { Cameras } from '../visca/__tests__/simulator/cameras.js'
 import { SimulatedCamera } from '../visca/__tests__/simulator/simulated-camera.js'
 
 /** How long the module's socket waits after a failed attempt to connect before trying again. */
 const ReconnectInterval = 2000
 
-describe.each(Cameras)(
-	'camera unreachable when the module starts, then appears: $name',
+describeEachCamera(
+	'camera unreachable when the module starts, then appears',
+	['on', 'standby'],
 	({ replies: { on, standby } }) => {
 		// How a camera wakes is for other scenarios: this one is on as soon as
 		// it's told to be.

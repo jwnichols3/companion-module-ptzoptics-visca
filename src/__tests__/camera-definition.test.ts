@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import type { CameraDefinition } from '../cameras/index.js'
 import { eventually } from './faked-time.js'
 import { ModuleUnderTest } from './module-under-test.js'
-import { Cameras, PowerInquiryBytes } from '../visca/__tests__/simulator/cameras.js'
+import { Cameras, PowerInquiryBytes, recordedIn } from '../visca/__tests__/simulator/cameras.js'
 import { SimulatedCamera } from '../visca/__tests__/simulator/simulated-camera.js'
 import type { Bytes } from '../utils/byte.js'
 
@@ -34,7 +34,7 @@ vi.mock(import('../cameras/index.js'), async (importOriginal) => {
 /** A camera that answers every inquiry, on or in standby, so that an inquiry it never receives was never sent. */
 function cameraAnsweringEverything() {
 	const camera = Cameras.find(({ name }) => name === 'ptzoptics (captured)')
-	if (camera === undefined) {
+	if (camera === undefined || !recordedIn(camera, ['on', 'standby'])) {
 		throw new Error('The captures of the PTZOptics camera are missing')
 	}
 	return camera.replies
@@ -45,7 +45,7 @@ function capturedZoom(power: 'on' | 'standby'): number {
 	const answer = cameraAnsweringEverything()[power].replies.find(
 		({ inquiry }) => String(inquiry) === String(ZoomPositionInquiryBytes),
 	)
-	if (answer === undefined) {
+	if (answer === undefined || answer.reply === null) {
 		throw new Error('The captures of the PTZOptics camera lack the zoom position')
 	}
 	// `90 50 0p 0q 0r 0s FF`

@@ -5,13 +5,14 @@ import { PresetActionId, PresetAsNumberId, PresetIsTextId } from '../actions/pre
 import { ZoomActionId } from '../actions/zoom.js'
 import type { CameraPowerState } from '../camera/power.js'
 import type { RawConfig } from '../config.js'
+import { describeEachCamera } from './each-camera.js'
 import { OverlapWaitLimitMs } from '../instance.js'
 import { ModuleUnderTest } from './module-under-test.js'
 import { PollGroupId } from '../status/groups.js'
 import type { Bytes } from '../utils/byte.js'
 import { prettyBytes } from '../utils/pretty.js'
 import { PanTiltHomeBytes, PresetRecallBytes } from '../visca/__tests__/camera-interactions/bytes.js'
-import { Cameras, HandWrittenCamera, PowerInquiryBytes } from '../visca/__tests__/simulator/cameras.js'
+import { HandWrittenCamera, PowerInquiryBytes } from '../visca/__tests__/simulator/cameras.js'
 import { type CameraReplies, SimulatedCamera } from '../visca/__tests__/simulator/simulated-camera.js'
 
 // T3, contention: an operator presses bursts of buttons while the module
@@ -205,7 +206,7 @@ class TimedRig {
 	}
 
 	static async start(
-		camera: { readonly power: CameraPowerState; readonly replies: CameraReplies; readonly latencyMs: number },
+		camera: { readonly power: CameraPowerState; readonly replies: CameraReplies<never>; readonly latencyMs: number },
 		config: Omit<RawConfig, 'host' | 'port' | 'debugLogging'>,
 	): Promise<TimedRig> {
 		const simulated = await SimulatedCamera.start(camera)
@@ -337,9 +338,9 @@ function report(title: string, timings: readonly Timing[]): string {
 	)
 }
 
-describe.each(Cameras)('bursts of commands during polling: $name', ({ replies: { on, standby } }) => {
-	// How a camera wakes is for other scenarios.
-	const camera = { power: 'on', replies: { on, standby }, latencyMs: CameraLatencyMs } as const
+describeEachCamera('bursts of commands during polling', ['on'], ({ replies: { on } }) => {
+	// The camera stays on throughout.
+	const camera = { power: 'on', replies: { on }, latencyMs: CameraLatencyMs } as const
 
 	test('every command is sent and acknowledged in order, and polling delays none for long', async () => {
 		// The baseline: the same bursts with polling off.

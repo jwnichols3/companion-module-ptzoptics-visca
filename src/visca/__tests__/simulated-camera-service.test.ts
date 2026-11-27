@@ -1,8 +1,11 @@
 import { spawn } from 'node:child_process'
 import net from 'node:net'
 import { fileURLToPath } from 'node:url'
-import { afterEach, describe, expect, test } from 'vitest'
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
+import { eventually, timePasses } from '../../__tests__/faked-time.js'
+import { Cameras } from './simulator/cameras.js'
 import { type Service, startService, UsageError } from './simulator/service.js'
+import { SimulatedCamera } from './simulator/simulated-camera.js'
 
 const PowerInquiry = [0x81, 0x09, 0x04, 0x00, 0xff]
 const PowerOn = [0x81, 0x01, 0x04, 0x00, 0x02, 0xff]
@@ -14,6 +17,16 @@ const ACKCompletion = [0x90, 0x41, 0xff, 0x90, 0x51, 0xff]
 
 /** A camera that's on as soon as it's told to be, so that nothing here waits on a wake-up. */
 const Camera = 'refuses-inquiries-in-standby'
+
+/** A camera recorded only while on, which left some inquiries unanswered. */
+const CameraRecordedOn = 'ptzoptics-unidentified-a'
+
+/** A camera recorded only while in standby. */
+const CameraRecordedInStandby = 'avkans-unidentified'
+
+const PanTiltInquiry = [0x81, 0x09, 0x06, 0x12, 0xff]
+/** An inquiry `CameraRecordedOn` left unanswered. */
+const ColorTemperatureInquiry = [0x81, 0x09, 0x04, 0x20, 0xff]
 
 /** A plain TCP connection to the service, as a client of a camera makes. */
 class Client {
@@ -49,6 +62,15 @@ class Client {
 		const reply = this.#received.slice(0, replyLength)
 		this.#received = this.#received.slice(replyLength)
 		return reply
+	}
+
+	/** Send a message and wait for the far end to close the connection. */
+	async closedAfter(message: readonly number[]): Promise<void> {
+		const closed = new Promise<void>((resolve: () => void) => {
+			this.#socket.once('close', resolve)
+		})
+		this.#socket.write(new Uint8Array(message))
+		return closed
 	}
 
 	close(): void {
@@ -129,12 +151,57 @@ describe('simulated camera as a network service', () => {
 		again.close()
 	})
 
-	test('lists the cameras it can play when asked', async () => {
+	test('plays a camera recorded in one power state only, in that state', async () => {
+		const client = await start(CameraRecordedInStandby, '--state', 'standby', '--port', '0')
+
+		expect(await client.send(PowerInquiry, 4)).toEqual(AnswersStandby)
+		expect(await client.send(PanTiltInquiry, 4)).toEqual([0x90, 0x61, 0x41, 0xff])
+	})
+
+	test.each([
+		[[CameraRecordedInStandby, '--port', '0'], `${CameraRecordedInStandby} wasn't recorded on`],
+		[[CameraRecordedOn, '--state', 'standby', '--port', '0'], `${CameraRecordedOn} wasn't recorded in standby`],
+	])(
+		'refuses to play a camera in a power state it was not recorded in: %j',
+		async (argv: string[], message: string) => {
+			await expect(startService(argv, () => {})).rejects.toThrow(new UsageError(message))
+		},
+	)
+
+	test('answers nothing to an inquiry the camera was recorded leaving unanswered', async () => {
+		const client = await start(CameraRecordedOn, '--port', '0')
+
+		// Had the first inquiry been answered, its answer would come first.
+		expect(await client.send([...ColorTemperatureInquiry, ...PowerInquiry], 4)).toEqual(AnswersOn)
+		expect(printed.slice(1)).toEqual(['received 81 09 04 20 FF', 'received 81 09 04 00 FF'])
+	})
+
+	test('gives up, rather than make up a power state the camera was not recorded in', async () => {
+		const client = await start(CameraRecordedOn, '--port', '0')
+		expect(await client.send(PowerInquiry, 4)).toEqual(AnswersOn)
+
+		// Neither acknowledged nor obeyed: the connection is closed, no
+		// more are accepted, and stopping the camera says why.
+		await client.closedAfter(PowerOff)
+		expect(printed.slice(2)).toEqual([
+			'received 81 01 04 00 03 FF',
+			'gave up: told to be in standby, with no replies for that state',
+		])
+		await expect(Client.connect(service?.port ?? 0)).rejects.toThrow('ECONNREFUSED')
+		await expect(service?.stop()).rejects.toThrow(
+			'The simulated camera was told to be in standby, and has no replies for that state',
+		)
+		service = null
+	})
+
+	test('lists the cameras it can play when asked, and the one power state of a camera recorded in only one', async () => {
 		const printed: string[] = []
 
 		expect(await startService(['--list'], (line: string) => printed.push(line))).toBeNull()
 		expect(printed).toContain('  ptzoptics')
 		expect(printed).toContain(`  ${Camera}`)
+		expect(printed).toContain(`  ${CameraRecordedOn} (on only)`)
+		expect(printed).toContain(`  ${CameraRecordedInStandby} (standby only)`)
 	})
 
 	test('lists the cameras it can play when the name is unknown', async () => {
@@ -198,4 +265,51 @@ describe('simulated camera as a network service', () => {
 			child.kill()
 		}
 	}, 20_000)
+})
+
+describe('simulated camera playing a capture', () => {
+	// Fake only the timers, not the sockets, so that the time the camera
+	// takes over a reply takes no real time.
+	beforeEach(() => {
+		vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+	})
+	afterEach(() => {
+		vi.useRealTimers()
+	})
+
+	test('takes as long over a reply as the camera was recorded taking, if asked to', async () => {
+		const replies = Cameras.find(({ id }) => id === CameraRecordedOn)?.replies
+		const slowest = replies?.on?.replies.reduce((slowest, reply) =>
+			(reply.tookMs ?? 0) > (slowest.tookMs ?? 0) ? reply : slowest,
+		)
+		if (replies === undefined || slowest === undefined || slowest.reply === null || slowest.tookMs === undefined) {
+			throw new Error(`The capture of ${CameraRecordedOn} on is missing, or lacks reply times`)
+		}
+		// One answer in each capture so far took a third of a second, twenty
+		// times as long as the rest.
+		expect(slowest.tookMs).toBeGreaterThan(300)
+
+		const camera = await SimulatedCamera.start({ power: 'on', replies, latencyMs: 'recorded' })
+		const client = await Client.connect(camera.port)
+		try {
+			let answered = false
+			const answer = client.send(slowest.inquiry, slowest.reply.length).finally(() => {
+				answered = true
+			})
+
+			// The camera's time starts when the inquiry reaches it.
+			await eventually(() => {
+				expect(camera.received).toEqual([slowest.inquiry])
+			})
+			await timePasses(slowest.tookMs - 50)
+			expect(answered).toBe(false)
+			await eventually(() => {
+				expect(answered).toBe(true)
+			}, 100)
+			expect(await answer).toEqual(slowest.reply)
+		} finally {
+			client.close()
+			await camera.stop()
+		}
+	})
 })

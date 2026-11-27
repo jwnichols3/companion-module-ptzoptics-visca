@@ -1,11 +1,11 @@
 import { InstanceStatus } from '@companion-module/base'
-import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
+import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import { PowerActionId } from '../actions/power.js'
 import type { CameraPowerState } from '../camera/power.js'
+import { describeEachCamera } from './each-camera.js'
 import { eventually, fakedTimeWaitsForSockets, timePasses } from './faked-time.js'
 import { ModuleUnderTest } from './module-under-test.js'
 import { CameraPowerBytes, CommandNotExecutable } from '../visca/__tests__/camera-interactions/bytes.js'
-import { Cameras } from '../visca/__tests__/simulator/cameras.js'
 import { SimulatedCamera } from '../visca/__tests__/simulator/simulated-camera.js'
 
 // T2, fault injection: the module polls a camera that misbehaves again and
@@ -186,8 +186,9 @@ test('a seed always gives the same faults, so a failed run can be run again', ()
 	expect(plannedFaults(Seed + 1, FaultCount)).not.toEqual(plannedFaults(Seed, FaultCount))
 })
 
-describe.each(Cameras)(
-	`${FaultCount} faults, one after another, from seed ${Seed}: $name`,
+describeEachCamera(
+	`${FaultCount} faults, one after another, from seed ${Seed}`,
+	['on', 'standby'],
 	({ replies: { on, standby } }) => {
 		// How a camera wakes is for other scenarios: this one is on as soon as
 		// it's told to be.

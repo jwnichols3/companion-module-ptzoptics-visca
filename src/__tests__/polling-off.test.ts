@@ -1,10 +1,10 @@
 import { InstanceStatus } from '@companion-module/base'
-import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
+import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import { PowerActionId } from '../actions/power.js'
+import { describeEachCamera } from './each-camera.js'
 import { eventually, timePasses } from './faked-time.js'
 import { ModuleUnderTest } from './module-under-test.js'
 import { CameraPowerBytes } from '../visca/__tests__/camera-interactions/bytes.js'
-import { Cameras } from '../visca/__tests__/simulator/cameras.js'
 import { SimulatedCamera } from '../visca/__tests__/simulator/simulated-camera.js'
 
 const CameraStandbyBytes = [0x81, 0x01, 0x04, 0x00, 0x03, 0xff]
@@ -16,7 +16,7 @@ function errorsLogged(module: ModuleUnderTest): string[] {
 	return module.logs.filter(({ level }) => level === 'error').map(({ message }) => message)
 }
 
-describe.each(Cameras)('status polling off: $name', ({ replies }) => {
+describeEachCamera('status polling off', ['on', 'standby'], ({ replies }) => {
 	// Fake only the timers, not the sockets, so that minutes of nothing
 	// happening, and a wake-up played back as slowly as it was recorded, take
 	// no real time.

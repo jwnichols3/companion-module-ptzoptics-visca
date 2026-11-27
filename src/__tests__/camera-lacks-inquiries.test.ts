@@ -1,12 +1,17 @@
 import { InstanceStatus } from '@companion-module/base'
-import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
+import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import { PowerActionId } from '../actions/power.js'
 import type { CameraDefinition } from '../cameras/index.js'
+import { describeEachCamera } from './each-camera.js'
 import { eventually, timePasses } from './faked-time.js'
 import { ModuleUnderTest } from './module-under-test.js'
 import { CameraPowerBytes, SyntaxErrorBytes } from '../visca/__tests__/camera-interactions/bytes.js'
-import { Cameras, PowerInquiryBytes } from '../visca/__tests__/simulator/cameras.js'
-import { type CameraReplies, SimulatedCamera } from '../visca/__tests__/simulator/simulated-camera.js'
+import { PowerInquiryBytes } from '../visca/__tests__/simulator/cameras.js'
+import {
+	type CameraReplies,
+	SimulatedCamera,
+	type StateReplies,
+} from '../visca/__tests__/simulator/simulated-camera.js'
 import type { Bytes } from '../utils/byte.js'
 
 const ZoomPositionInquiryBytes = [0x81, 0x09, 0x04, 0x47, 0xff]
@@ -40,20 +45,21 @@ function sameBytes(b1: Bytes, b2: Bytes): boolean {
 	return String(b1) === String(b2)
 }
 
-/** The camera as it would be if it answered the focus inquiries, on or in standby, with a syntax error. */
-function lackingFocus({ on, standby }: CameraReplies): CameraReplies {
-	const lacking = ({ replies, otherwise }: CameraReplies['on']) => ({
-		replies: [
-			...replies.filter(({ inquiry }) => !Lacked.some((lacked) => sameBytes(lacked, inquiry))),
-			...Lacked.map((inquiry) => ({ inquiry, reply: SyntaxErrorBytes })),
-		],
-		otherwise,
-	})
-	return { on: lacking(on), standby: lacking(standby) }
+/** The camera as it would be if it answered the focus inquiries, while on, with a syntax error. */
+function lackingFocus({ on: { replies, otherwise } }: CameraReplies<'on'>): CameraReplies<'on'> {
+	return {
+		on: {
+			replies: [
+				...replies.filter(({ inquiry }) => !Lacked.some((lacked) => sameBytes(lacked, inquiry))),
+				...Lacked.map((inquiry) => ({ inquiry, reply: SyntaxErrorBytes })),
+			],
+			otherwise,
+		},
+	}
 }
 
 /** The camera's answers while on, but with its zoom at `ZoomedTo`. */
-function zoomed({ on: { replies, otherwise } }: CameraReplies): CameraReplies['on'] {
+function zoomed({ on: { replies, otherwise } }: CameraReplies<'on'>): StateReplies {
 	return {
 		replies: replies.map(({ inquiry, reply }) => ({
 			inquiry,
@@ -71,7 +77,7 @@ function noLongerPolled(module: ModuleUnderTest): string[] {
 	return module.logs.map(({ message }) => message).filter((message) => message.includes('no longer polling'))
 }
 
-describe.each(Cameras)('camera lacks the focus inquiries: $name', ({ replies }) => {
+describeEachCamera('camera lacks the focus inquiries', ['on'], ({ replies }) => {
 	// Fake only the timers, not the sockets, so that waiting for the camera
 	// to be taken as awake takes no real time.
 	beforeEach(() => {

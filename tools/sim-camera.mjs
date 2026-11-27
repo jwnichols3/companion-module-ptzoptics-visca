@@ -14,7 +14,10 @@
 // by `tools/capture-camera.mjs`, or a camera written by hand for the tests.
 // `--list` prints them all, as does naming a camera that isn't one of them.
 //
-//   --state          the power state the camera starts in: on if omitted
+//   --state          the power state the camera starts in: on if omitted.  A
+//                    camera recorded in only one power state plays only that
+//                    one, as `--list` says, and gives up, closing the
+//                    connection, if told to enter the other.
 //   --port           the TCP port to listen on: 5678 if omitted, and 0 for a
 //                    port the OS chooses
 //   --host           the address to listen on: 127.0.0.1 if omitted, so that

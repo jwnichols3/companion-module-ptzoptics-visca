@@ -6,11 +6,14 @@ import type { Bytes } from '../../../utils/byte.js'
 /** The bytes a camera sends in reply to one inquiry. */
 type InquiryReply = {
 	readonly inquiry: Bytes
-	readonly reply: Bytes
+	/** Null if the camera ignores the inquiry, sending nothing in reply. */
+	readonly reply: Bytes | null
+	/** How many milliseconds a real camera took over the reply, if that was recorded. */
+	readonly tookMs?: number
 }
 
 /** How a camera answers inquiries while in one power state. */
-type StateReplies = {
+export type StateReplies = {
 	readonly replies: readonly InquiryReply[]
 	/** The reply to any inquiry not listed in `replies`. */
 	readonly otherwise: Bytes
@@ -45,8 +48,13 @@ export type WakeUpStep = { readonly atMs: number } & (
  * How a camera answers inquiries in each power state, and what it does as it
  * wakes from standby, as plain data, so that what was recorded from a real
  * camera can be played back.
+ *
+ * A camera may have been recorded in only one power state.  `Recorded` names
+ * the states the replies are known to cover: both, unless told otherwise.
  */
-export type CameraReplies = { readonly [state in CameraPowerState]: StateReplies } & {
+export type CameraReplies<Recorded extends CameraPowerState = CameraPowerState> = {
+	readonly [state in Recorded]: StateReplies
+} & { readonly [state in Exclude<CameraPowerState, Recorded>]?: StateReplies } & {
 	/**
 	 * What the camera does after it's told to power on, in order.  Once the
 	 * last step is done the camera is awake, answering as that step left it.
@@ -56,9 +64,9 @@ export type CameraReplies = { readonly [state in CameraPowerState]: StateReplies
 }
 
 type SimulatedCameraOptions = {
-	/** The power state of the camera when it starts. */
+	/** The power state of the camera when it starts: one it has replies for. */
 	readonly power: CameraPowerState
-	readonly replies: CameraReplies
+	readonly replies: CameraReplies<never>
 	/**
 	 * How many times faster than its steps say the camera wakes up, to
 	 * shorten a wake-up that took a real camera half a minute.  1 if omitted.
@@ -67,9 +75,10 @@ type SimulatedCameraOptions = {
 	/**
 	 * How many milliseconds the camera takes over each reply, as a real
 	 * camera takes about ten: every reply is sent this long after its message
-	 * arrives.  0 if omitted.
+	 * arrives.  `'recorded'` to take over each reply to an inquiry as long as
+	 * a real camera was recorded taking, where that's known.  0 if omitted.
 	 */
-	readonly latencyMs?: number
+	readonly latencyMs?: number | 'recorded'
 	/** The address to listen on.  `127.0.0.1` if omitted. */
 	readonly host?: string
 	/** The TCP port to listen on.  One the OS chooses if omitted. */
@@ -103,6 +112,11 @@ function hex(bytes: Bytes): string {
 	return bytes.map((byte) => byte.toString(16).toUpperCase().padStart(2, '0')).join(' ')
 }
 
+/** Say a power state the way a sentence about a camera does: "on", "in standby". */
+function stateInWords(power: CameraPowerState): string {
+	return power === 'on' ? 'on' : 'in standby'
+}
+
 function sameBytes(b1: Bytes, b2: Bytes): boolean {
 	return b1.length === b2.length && b1.every((b, i) => b === b2[i])
 }
@@ -117,6 +131,11 @@ function sameBytes(b1: Bytes, b2: Bytes): boolean {
  * Told to go to standby, it answers as in standby.  Told to power on, it
  * wakes up the way its replies say a camera does, then answers as on.
  *
+ * It never plays a power state it has no replies for.  It can't be started in
+ * one, and told to enter one it gives up: it closes every connection, refuses
+ * more, and `stop()` then rejects, so that what a real camera would have done
+ * next, which nobody recorded, is never made up.
+ *
  * Where `RunCameraInteractionTest` scripts one exact exchange with a
  * `VISCAPort`, this keeps answering for as long as it's asked, so that a whole
  * module can run against it.
@@ -124,14 +143,14 @@ function sameBytes(b1: Bytes, b2: Bytes): boolean {
 export class SimulatedCamera {
 	readonly #server: net.Server
 	readonly #sockets = new Set<net.Socket>()
-	readonly #replies: CameraReplies
+	readonly #replies: CameraReplies<never>
 	#power: CameraPowerState
 
 	/** How the camera answers inquiries at the moment. */
 	#answers: StateReplies
 
 	readonly #wakeUpSpeed: number
-	readonly #latencyMs: number
+	readonly #latencyMs: number | 'recorded'
 	readonly #host: string
 	readonly #log: (line: string) => void
 
@@ -151,6 +170,9 @@ export class SimulatedCamera {
 	/** Whether the camera is ignoring every message it receives. */
 	#silent = false
 
+	/** Why the camera gave up, if it was told to enter a power state it has no replies for. */
+	#gaveUp: Error | null = null
+
 	/** The TCP port the camera is listening on. */
 	readonly port: number
 
@@ -163,6 +185,7 @@ export class SimulatedCamera {
 	private constructor(
 		server: net.Server,
 		port: number,
+		answers: StateReplies,
 		{ power, replies, wakeUpSpeed = 1, latencyMs = 0, host = '127.0.0.1', log = () => {} }: SimulatedCameraOptions,
 	) {
 		this.#server = server
@@ -171,7 +194,7 @@ export class SimulatedCamera {
 		this.port = port
 		this.#power = power
 		this.#replies = replies
-		this.#answers = replies[power]
+		this.#answers = answers
 		this.#wakeUpSpeed = wakeUpSpeed
 		this.#latencyMs = latencyMs
 
@@ -211,8 +234,18 @@ export class SimulatedCamera {
 		})
 	}
 
-	/** Start a camera listening, on `127.0.0.1` and a port the OS chooses unless told otherwise. */
+	/**
+	 * Start a camera listening, on `127.0.0.1` and a port the OS chooses unless told otherwise.
+	 *
+	 * @throws
+	 *    If the camera has no replies for the power state it's to start in.
+	 */
 	static async start(options: SimulatedCameraOptions): Promise<SimulatedCamera> {
+		const answers = options.replies[options.power]
+		if (answers === undefined) {
+			throw new Error(`The camera can't start ${stateInWords(options.power)}: it has no replies for that state`)
+		}
+
 		return new Promise((resolve: (camera: SimulatedCamera) => void, reject: (err: Error) => void) => {
 			const server = net.createServer({ noDelay: true })
 
@@ -226,7 +259,7 @@ export class SimulatedCamera {
 					return
 				}
 
-				resolve(new SimulatedCamera(server, addr.port, options))
+				resolve(new SimulatedCamera(server, addr.port, answers, options))
 			})
 		})
 	}
@@ -328,7 +361,13 @@ export class SimulatedCamera {
 		}
 	}
 
-	/** Close every connection to the camera and stop listening. */
+	/**
+	 * Close every connection to the camera and stop listening.
+	 *
+	 * @throws
+	 *    If the camera gave up because it was told to enter a power state it
+	 *    has no replies for.
+	 */
 	async stop(): Promise<void> {
 		this.#abandonWakeUp()
 		if (this.#stallTimer !== null) {
@@ -338,17 +377,21 @@ export class SimulatedCamera {
 		for (const socket of this.#sockets) {
 			socket.destroy()
 		}
-		return new Promise((resolve: () => void) => {
+		await new Promise((resolve: (value: void) => void) => {
 			this.#server.close(() => {
 				resolve()
 			})
 		})
+		if (this.#gaveUp !== null) {
+			throw this.#gaveUp
+		}
 	}
 
 	/** Act on one received message and reply to it, misbehaving as instructed. */
 	#answer(socket: net.Socket, message: Bytes): void {
-		let reply = this.#replyTo(message)
-		if (this.#unsolicited.length > 0) {
+		const replied = this.#replyTo(message)
+		let reply = replied.reply
+		if (reply !== null && this.#unsolicited.length > 0) {
 			reply = [...reply, ...this.#unsolicited]
 			this.#unsolicited = []
 		}
@@ -362,7 +405,12 @@ export class SimulatedCamera {
 
 		const fault = this.#replyFaults.shift()
 		const bytes = fault !== undefined && 'garbled' in fault ? fault.garbled : reply
-		const afterMs = this.#latencyMs + (fault !== undefined && 'late' in fault ? fault.late : 0)
+		if (bytes === null) {
+			// Received, and never answered.
+			return
+		}
+		const latencyMs = this.#latencyMs === 'recorded' ? (replied.tookMs ?? 0) : this.#latencyMs
+		const afterMs = latencyMs + (fault !== undefined && 'late' in fault ? fault.late : 0)
 		if (afterMs === 0) {
 			send(bytes)
 		} else {
@@ -372,11 +420,14 @@ export class SimulatedCamera {
 		}
 	}
 
-	/** Act on one received message, returning the bytes to send in reply. */
-	#replyTo(message: Bytes): Bytes {
+	/**
+	 * Act on one received message, returning the bytes to send in reply, if
+	 * any, and how long a real camera took over them, if that's known.
+	 */
+	#replyTo(message: Bytes): Pick<InquiryReply, 'reply' | 'tookMs'> {
 		const [header, type] = message
 		if (header !== 0x81) {
-			return SyntaxErrorBytes
+			return { reply: SyntaxErrorBytes }
 		}
 
 		switch (type) {
@@ -384,31 +435,57 @@ export class SimulatedCamera {
 			case 0x01:
 				if (sameBytes(message, PowerOnBytes)) {
 					if (this.#power === 'standby') {
+						const { on } = this.#replies
+						if (on === undefined) {
+							return this.#giveUp('on')
+						}
 						this.#power = 'on'
-						this.#wakeUp()
+						this.#wakeUp(on)
 					}
 				} else if (sameBytes(message, PowerStandbyBytes)) {
+					const { standby } = this.#replies
+					if (standby === undefined) {
+						return this.#giveUp('standby')
+					}
 					if (this.#power === 'on') {
 						this.#log('power standby')
 					}
 					this.#abandonWakeUp()
 					this.#power = 'standby'
-					this.#answers = this.#replies.standby
+					this.#answers = standby
 				}
-				return ACKCompletion(Socket)
+				return { reply: ACKCompletion(Socket) }
 			// Inquiry
 			case 0x09: {
 				const { replies, otherwise } = this.#answers
-				return replies.find(({ inquiry }) => sameBytes(inquiry, message))?.reply ?? otherwise
+				return replies.find(({ inquiry }) => sameBytes(inquiry, message)) ?? { reply: otherwise }
 			}
 			default:
-				return SyntaxErrorBytes
+				return { reply: SyntaxErrorBytes }
 		}
 	}
 
-	/** Start doing what the camera does as it wakes from standby. */
-	#wakeUp(): void {
-		const { wakeUp = [], on } = this.#replies
+	/**
+	 * Give up, having been told to enter a power state the camera has no
+	 * replies for: close every connection, refuse more, and answer nothing.
+	 */
+	#giveUp(power: CameraPowerState): { readonly reply: null } {
+		this.#gaveUp ??= new Error(
+			`The simulated camera was told to be ${stateInWords(power)}, and has no replies for that state: ` +
+				'what a real camera does then was never recorded',
+		)
+		this.#log(`gave up: told to be ${stateInWords(power)}, with no replies for that state`)
+		this.#abandonWakeUp()
+		if (this.#server.listening) {
+			this.refuseConnections()
+		}
+		this.dropConnection()
+		return { reply: null }
+	}
+
+	/** Start doing what the camera does as it wakes from standby, to answer as given once on. */
+	#wakeUp(on: StateReplies): void {
+		const { wakeUp = [] } = this.#replies
 		if (wakeUp.length === 0) {
 			this.#answers = on
 			this.#log('power on')

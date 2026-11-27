@@ -1,10 +1,11 @@
 import { InstanceStatus } from '@companion-module/base'
-import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
+import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import { PowerActionId } from '../actions/power.js'
+import { describeEachCamera } from './each-camera.js'
 import { eventually, timePasses } from './faked-time.js'
 import { ModuleUnderTest } from './module-under-test.js'
 import { CameraPowerBytes } from '../visca/__tests__/camera-interactions/bytes.js'
-import { Cameras, PowerInquiryBytes } from '../visca/__tests__/simulator/cameras.js'
+import { PowerInquiryBytes } from '../visca/__tests__/simulator/cameras.js'
 import { SimulatedCamera } from '../visca/__tests__/simulator/simulated-camera.js'
 import type { Bytes } from '../utils/byte.js'
 
@@ -32,7 +33,7 @@ function errorsLogged(module: ModuleUnderTest): string[] {
 // told from that inquiry's answer.  One that arrives while nothing at all is
 // unanswered can, and must go no further.
 
-describe.each(Cameras)('camera sends an answer nothing asked for, between poll passes: $name', ({ replies }) => {
+describeEachCamera('camera sends an answer nothing asked for, between poll passes', ['on'], ({ replies }) => {
 	// Fake only the timers, not the sockets, so that the waits between poll
 	// passes take no real time, and the answer can be sent during one.
 	beforeEach(() => {

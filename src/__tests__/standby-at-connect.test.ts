@@ -1,16 +1,17 @@
 import { InstanceStatus } from '@companion-module/base'
-import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
+import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import { PowerActionId } from '../actions/power.js'
+import { describeEachCamera } from './each-camera.js'
 import { eventually } from './faked-time.js'
 import { ModuleUnderTest } from './module-under-test.js'
 import { CameraPowerBytes } from '../visca/__tests__/camera-interactions/bytes.js'
-import { Cameras, PowerInquiryBytes } from '../visca/__tests__/simulator/cameras.js'
+import { PowerInquiryBytes } from '../visca/__tests__/simulator/cameras.js'
 import { SimulatedCamera } from '../visca/__tests__/simulator/simulated-camera.js'
 
 /** How many poll passes the module must get through with the camera in standby. */
 const StandbyPollPasses = 10
 
-describe.each(Cameras)('camera in standby when the module connects: $name', ({ replies }) => {
+describeEachCamera('camera in standby when the module connects', ['standby'], ({ replies }) => {
 	// Fake only the timers, not the sockets, so that the waits between poll
 	// passes take no real time.
 	beforeEach(() => {
@@ -20,7 +21,13 @@ describe.each(Cameras)('camera in standby when the module connects: $name', ({ r
 		vi.useRealTimers()
 	})
 
-	test('connection stays ok, only power is polled, and Power On reaches the camera', async () => {
+	// The camera is told to power on, which one never recorded on can't be.
+	const powersOn = replies.on !== undefined
+	if (!powersOn) {
+		test.skip("Power On reaches the camera: not run, the camera wasn't recorded on", () => {})
+	}
+
+	test(`connection stays ok${powersOn ? ', only power is polled, and Power On reaches the camera' : ' and only power is polled'}`, async () => {
 		const camera = await SimulatedCamera.start({ power: 'standby', replies })
 
 		const module = await ModuleUnderTest.start({
@@ -52,12 +59,14 @@ describe.each(Cameras)('camera in standby when the module connects: $name', ({ r
 				expect(message).toEqual(PowerInquiryBytes)
 			}
 
-			await module.executeAction(PowerActionId.CameraPowerState, { bool: 'on' })
-			await eventually(() => {
-				expect(camera.power).toBe('on')
-			})
-			expect(camera.received).toContainEqual(CameraPowerBytes)
-			expect(module.status).toBe(InstanceStatus.Ok)
+			if (powersOn) {
+				await module.executeAction(PowerActionId.CameraPowerState, { bool: 'on' })
+				await eventually(() => {
+					expect(camera.power).toBe('on')
+				})
+				expect(camera.received).toContainEqual(CameraPowerBytes)
+				expect(module.status).toBe(InstanceStatus.Ok)
+			}
 		} finally {
 			await module.destroy()
 			await camera.stop()

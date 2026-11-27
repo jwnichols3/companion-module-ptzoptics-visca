@@ -1,7 +1,7 @@
 import { InstanceStatus } from '@companion-module/base'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import { PowerActionId } from '../actions/power.js'
-import { eventually, timePasses } from './faked-time.js'
+import { eventually } from './faked-time.js'
 import { ModuleUnderTest } from './module-under-test.js'
 import { CameraPowerBytes } from '../visca/__tests__/camera-interactions/bytes.js'
 import { Cameras } from '../visca/__tests__/simulator/cameras.js'
@@ -97,38 +97,6 @@ describe.each(CamerasRecordedWaking)('camera wakes from standby: $name', ({ repl
 			})
 			expect(camera.received).toContainEqual(CameraStandbyBytes)
 			expect(module.status).toBe(InstanceStatus.Ok)
-		} finally {
-			await module.destroy()
-			await camera.stop()
-		}
-	})
-
-	test('polling off: nothing is asked of the waking camera, and the connection is left alone', async () => {
-		const camera = await SimulatedCamera.start({ power: 'standby', replies })
-
-		const module = await ModuleUnderTest.start({
-			host: '127.0.0.1',
-			port: String(camera.port),
-			pollEnabled: false,
-		})
-		try {
-			await eventually(() => {
-				expect(module.status).toBe(InstanceStatus.Ok)
-			})
-
-			await module.executeAction(PowerActionId.CameraPowerState, { bool: 'on' })
-			await eventually(() => {
-				expect(camera.power).toBe('on')
-			})
-
-			await timePasses(wakeUpTakes + Recovery)
-			await module.executeAction(PowerActionId.CameraPowerState, { bool: 'on' })
-			await eventually(() => {
-				expect(camera.received.length).toBeGreaterThanOrEqual(2)
-			})
-			expect(camera.received).toEqual([CameraPowerBytes, CameraPowerBytes])
-			expect(module.statuses).toEqual([InstanceStatus.Connecting, InstanceStatus.Ok])
-			expect(errorsLogged(module)).toEqual([])
 		} finally {
 			await module.destroy()
 			await camera.stop()

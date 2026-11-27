@@ -832,6 +832,19 @@ export class VISCAPort {
 
 				const result = this.#findFirstInquiryWaitingForInitialResponse()
 				if (result === undefined) {
+					// A camera that has just powered on may answer an inquiry
+					// it was sent while powering on, even on an earlier
+					// connection.  If nothing at all awaits a response, the
+					// answer can't be mistaken for the response to anything,
+					// so ignore it.
+					if (
+						this.#waitingForInitialResponse.length === 0 &&
+						this.#waitingForCompletion.values().every((commands) => commands.length === 0)
+					) {
+						this.#instance.log('debug', `Ignoring unsolicited inquiry response ${prettyBytes(returnMessage)}`)
+						continue
+					}
+
 					throw this.#errorWhileProcessingMessage('Received inquiry response without a pending inquiry', returnMessage)
 				}
 				const { i, pendingInquiry } = result

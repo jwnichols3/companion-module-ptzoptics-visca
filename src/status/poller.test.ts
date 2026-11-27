@@ -150,10 +150,13 @@ describe('status poller', () => {
 		expect(target.sent).toEqual(['[81 09 04 00 FF]'])
 	})
 
-	test('drops an inquiry the camera does not support', async () => {
+	test('drops an inquiry the camera does not support, after three passes', async () => {
 		const target = new FakeTarget()
 		delete target.answers['[81 09 04 66 FF]']
 		const p = poller(target, [PollGroupId.Image])
+		await p.pollOnce()
+		await p.pollOnce()
+		expect(target.logs).toEqual([])
 		await p.pollOnce()
 		expect(target.logs).toHaveLength(1)
 		expect(target.values).toEqual([{ mirror: 'off' }])

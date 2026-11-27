@@ -9,6 +9,9 @@ import { SimulatedCamera } from '../visca/__tests__/simulator/simulated-camera.j
 /** How long the module's socket waits after a failed attempt to connect before trying again. */
 const ReconnectInterval = 2000
 
+/** How long the module gives the camera to answer a polled inquiry. */
+const InquiryTimeout = 3000
+
 /** How late a late reply is: several poll intervals. */
 const Late = 1000
 
@@ -27,8 +30,8 @@ describe('a reply from the camera arrives late or garbled', () => {
 		vi.useRealTimers()
 	})
 
-	// The port sets no time limit on a reply, so a late reply fails nothing:
-	// it answers its inquiry whenever it arrives.
+	// The port sets no time limit on a reply, so a reply that's only a little
+	// late fails nothing: it answers its inquiry when it arrives.
 
 	test('one reply late: a Power On sent meanwhile reaches the camera, and nothing fails', async () => {
 		const camera = await SimulatedCamera.start({ power: 'standby', replies: RecordedReplies })
@@ -111,6 +114,62 @@ describe('a reply from the camera arrives late or garbled', () => {
 		}
 	})
 
+	// The status poller does set a time limit on the answers to its own
+	// inquiries.  A reply later than that finds its connection replaced.
+
+	test('one reply later than the time limit: the module reconnects, and the reply is never taken for an answer', async () => {
+		const camera = await SimulatedCamera.start({ power: 'standby', replies: RecordedReplies })
+
+		const module = await ModuleUnderTest.start({
+			host: '127.0.0.1',
+			port: String(camera.port),
+			pollEnabled: true,
+			pollInterval: 100,
+		})
+		try {
+			await vi.waitFor(() => {
+				expect(module.variable('power')).toBe('standby')
+			})
+
+			const receivedBefore = camera.received.length
+			camera.replyLate(2 * InquiryTimeout)
+			await vi.waitFor(() => {
+				expect(camera.received.length).toBeGreaterThan(receivedBefore)
+			})
+
+			vi.advanceTimersByTime(InquiryTimeout)
+			await vi.waitFor(() => {
+				expect(module.status).toBe(InstanceStatus.Ok)
+				expect(camera.received.length).toBeGreaterThan(receivedBefore + 1)
+			})
+
+			// The camera has powered on by the time the late reply, which
+			// says standby, is sent.
+			await module.executeAction(PowerActionId.CameraPowerState, { bool: 'on' })
+			await vi.waitFor(() => {
+				expect(module.variable('power')).toBe('on')
+			})
+			const receivedOn = camera.received.length
+			vi.advanceTimersByTime(InquiryTimeout)
+			await vi.waitFor(() => {
+				expect(camera.received.length).toBeGreaterThan(receivedOn + 3)
+			})
+			expect(module.variable('power')).toBe('on')
+
+			expect(module.statuses).toEqual([
+				InstanceStatus.Connecting,
+				InstanceStatus.Ok,
+				InstanceStatus.ConnectionFailure,
+				InstanceStatus.Connecting,
+				InstanceStatus.Ok,
+			])
+			expect(errorsLogged(module)).toEqual([])
+		} finally {
+			await module.destroy()
+			await camera.stop()
+		}
+	})
+
 	// A garbled reply that's still a well-formed return message is taken as
 	// the answer to the oldest unanswered inquiry, which fails for not being
 	// in the expected format.  The connection is kept.
@@ -156,12 +215,10 @@ describe('a reply from the camera arrives late or garbled', () => {
 		}
 	})
 
-	// BUG: the status poller takes one failed inquiry in an otherwise good
-	// pass to mean the camera doesn't support that inquiry, and never sends it
-	// again.  So one garbled reply stops a value updating until the settings
-	// are changed.  This test fails until the poller tells a reply garbled
-	// once from an inquiry the camera never answers.
-	test.fails('reply garbled into a different return message: the inquiry is sent again on later passes', async () => {
+	// One failed inquiry in an otherwise good pass doesn't mean the camera
+	// lacks that inquiry: the status poller only stops sending an inquiry the
+	// camera refuses pass after pass.
+	test('reply garbled into a different return message: the inquiry is sent again on later passes', async () => {
 		const camera = await SimulatedCamera.start({ power: 'on', replies: RecordedReplies })
 
 		const module = await ModuleUnderTest.start({
@@ -190,12 +247,10 @@ describe('a reply from the camera arrives late or garbled', () => {
 		}
 	})
 
-	// BUG: the status poller waits without limit for the answer to each
-	// inquiry before sending the next.  A reply that loses its terminator
-	// never completes, so polling stops for good while the connection still
-	// reads ok.  This test fails until the poller gives up on an inquiry that
-	// goes unanswered.
-	test.fails('reply cut short before its terminator: polling carries on', async () => {
+	// A reply that loses its terminator never completes, so its inquiry goes
+	// unanswered.  The module gives up on it after a time limit, takes the
+	// connection for lost, and reconnects.
+	test('reply cut short before its terminator: the module reconnects and polling carries on', async () => {
 		const camera = await SimulatedCamera.start({ power: 'on', replies: RecordedReplies })
 
 		const module = await ModuleUnderTest.start({
@@ -212,14 +267,25 @@ describe('a reply from the camera arrives late or garbled', () => {
 
 			const garbledAt = camera.received.length
 			camera.replyGarbled([0x90, 0x50, 0x02])
+			await vi.waitFor(() => {
+				expect(camera.received.length).toBeGreaterThan(garbledAt)
+			})
 
-			vi.advanceTimersByTime(60 * 1000)
-			await vi.waitFor(
-				() => {
-					expect(camera.received.length).toBeGreaterThan(garbledAt + 1)
-				},
-				{ timeout: 250 },
-			)
+			vi.advanceTimersByTime(InquiryTimeout)
+			await vi.waitFor(() => {
+				expect(camera.received.length).toBeGreaterThan(garbledAt + 10)
+			})
+			expect(module.statuses).toEqual([
+				InstanceStatus.Connecting,
+				InstanceStatus.Ok,
+				InstanceStatus.ConnectionFailure,
+				InstanceStatus.Connecting,
+				InstanceStatus.Ok,
+			])
+			expect(errorsLogged(module)).toEqual([])
+
+			// Every inquiry is still being sent, the unanswered one included.
+			expect(camera.received.slice(garbledAt + 1)).toContainEqual(camera.received[garbledAt])
 		} finally {
 			await module.destroy()
 			await camera.stop()

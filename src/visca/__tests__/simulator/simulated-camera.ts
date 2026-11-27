@@ -53,8 +53,8 @@ function sameBytes(b1: Bytes, b2: Bytes): boolean {
  * A stand-in camera: a local TCP server that holds power state, answers each
  * inquiry with the reply given for its current power state, acknowledges and
  * completes every command, and records every message it receives.  It can
- * also be told to misbehave: to refuse or drop connections, to stall, and to
- * send a reply late or garbled.
+ * also be told to misbehave: to refuse or drop connections, to stall, to send
+ * a reply late or garbled, and to go silent when told to power on.
  *
  * Where `RunCameraInteractionTest` scripts one exact exchange with a
  * `VISCAPort`, this keeps answering for as long as it's asked, so that a whole
@@ -72,6 +72,12 @@ export class SimulatedCamera {
 	/** Messages received during a stall and not yet acted on, if stalled. */
 	#stalled: { readonly socket: net.Socket; readonly message: Bytes }[] | null = null
 	#stallTimer: ReturnType<typeof setTimeout> | null = null
+
+	/** Whether to go silent after acknowledging the next command to power on. */
+	#silentOnPowerOn = false
+
+	/** Whether the camera is ignoring every message it receives. */
+	#silent = false
 
 	/** The TCP port the camera is listening on, on `127.0.0.1`. */
 	readonly port: number
@@ -107,7 +113,9 @@ export class SimulatedCamera {
 					pending = pending.slice(terminator + 1)
 
 					this.received.push(message)
-					if (this.#stalled !== null) {
+					if (this.#silent) {
+						// Received, and never answered.
+					} else if (this.#stalled !== null) {
 						this.#stalled.push({ socket, message })
 					} else {
 						this.#answer(socket, message)
@@ -203,6 +211,24 @@ export class SimulatedCamera {
 		this.#replyFaults.push({ garbled: bytes })
 	}
 
+	/**
+	 * When next told to power on, acknowledge and complete the command, then
+	 * ignore every message received, on any connection, without closing a
+	 * connection, until `answerAgain()`.  A real camera does this for a while
+	 * as it wakes.
+	 */
+	goSilentOnPowerOn(): void {
+		this.#silentOnPowerOn = true
+	}
+
+	/**
+	 * Answer messages again after `goSilentOnPowerOn()`.  Messages received
+	 * meanwhile stay unanswered.
+	 */
+	answerAgain(): void {
+		this.#silent = false
+	}
+
 	/** Close every connection to the camera and stop listening. */
 	async stop(): Promise<void> {
 		if (this.#stallTimer !== null) {
@@ -254,6 +280,10 @@ export class SimulatedCamera {
 			case 0x01:
 				if (sameBytes(message, PowerOnBytes)) {
 					this.#power = 'on'
+					if (this.#silentOnPowerOn) {
+						this.#silentOnPowerOn = false
+						this.#silent = true
+					}
 				} else if (sameBytes(message, PowerStandbyBytes)) {
 					this.#power = 'standby'
 				}

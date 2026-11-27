@@ -6,8 +6,12 @@ import { type PolledInquiry, type PollGroupId, PollGroups } from './groups.js'
 export interface PollTarget {
 	/** Whether a connection to the camera exists or is being established. */
 	canPoll(): boolean
-	/** Send an inquiry, resolving its answer or an error, without logging. */
-	inquire(inquiry: Inquiry<AnswerParameters>): Promise<Answer<AnswerParameters> | Error>
+	/**
+	 * Send an inquiry, without logging.  Resolves its answer; an error if the
+	 * camera answered anything else; or null if the connection was lost
+	 * before an answer came.
+	 */
+	inquire(inquiry: Inquiry<AnswerParameters>): Promise<Answer<AnswerParameters> | Error | null>
 	setVariableValues(values: CompanionVariableValues): void
 	/** Called after each pass with whether the camera answered anything. */
 	passCompleted(answered: boolean): void
@@ -26,6 +30,13 @@ type PollSettings = {
 const FastPollWindowMs = 2000
 export const FastPollIntervalMs = 200
 
+/**
+ * How many passes in a row the camera must fail to answer an inquiry, while
+ * answering others, before the inquiry is taken as unsupported.  More than
+ * one, so that a single garbled reply costs nothing.
+ */
+const RefusalsBeforeUnsupported = 3
+
 /** Variables for the selected poll groups. */
 export function pollVariableDefinitions(groups: readonly PollGroupId[]): CompanionVariableDefinition[] {
 	return PollGroups.filter((g) => groups.includes(g.id)).flatMap((g) => g.variables)
@@ -35,17 +46,20 @@ export function pollVariableDefinitions(groups: readonly PollGroupId[]): Compani
  * Periodically sends status inquiries to the camera and publishes the answers
  * as variable values, publishing only values that changed.
  *
- * An inquiry that fails while other inquiries in the same pass succeed is
- * assumed unsupported by this camera and is dropped until settings change.
- * If every inquiry in a pass fails, the camera is probably unreachable, so
- * nothing is dropped.  While the camera reports standby, only power is
- * polled.
+ * An inquiry that fails in `RefusalsBeforeUnsupported` passes in a row, while
+ * other inquiries in those passes succeed, is assumed unsupported by this
+ * camera and is dropped until settings change.  If every inquiry in a pass
+ * fails, the camera is probably unreachable, so that pass counts against
+ * nothing.  While the camera reports standby, only power is polled.  A pass
+ * ends early if the connection is lost.
  */
 export class StatusPoller {
 	readonly #target: PollTarget
 	#settings: PollSettings = { enabled: false, interval: 1000, groups: [], zoomMax: 0x4000 }
 	#inquiries: PolledInquiry[] = []
 	#unsupported = new Set<string>()
+	/** How many passes in a row each inquiry has failed in, if any. */
+	#refusals = new Map<string, number>()
 	#lastValues = new Map<string, string | number | boolean | undefined>()
 	#timer: ReturnType<typeof setTimeout> | null = null
 	#running = false
@@ -62,6 +76,7 @@ export class StatusPoller {
 		this.#settings = settings
 		this.#inquiries = PollGroups.filter((g) => settings.groups.includes(g.id)).flatMap((g) => g.inquiries)
 		this.#unsupported.clear()
+		this.#refusals.clear()
 		this.#lastValues.clear()
 		if (settings.enabled && this.#inquiries.length > 0) {
 			this.#running = true
@@ -107,12 +122,18 @@ export class StatusPoller {
 			if (this.#unsupported.has(polled.id)) continue
 
 			const result = await this.#target.inquire(polled.inquiry)
+			if (result === null) {
+				// The rest of the pass would only wait on the new connection.
+				failed.push(polled)
+				break
+			}
 			if (result instanceof Error) {
 				failed.push(polled)
 				continue
 			}
 
 			succeeded++
+			this.#refusals.delete(polled.id)
 			const values = polled.toValues(result, ctx)
 			for (const [id, value] of Object.entries(values)) {
 				if (this.#lastValues.get(id) !== value) {
@@ -129,6 +150,10 @@ export class StatusPoller {
 
 		if (succeeded > 0) {
 			for (const { id } of failed) {
+				const refusals = (this.#refusals.get(id) ?? 0) + 1
+				this.#refusals.set(id, refusals)
+				if (refusals < RefusalsBeforeUnsupported) continue
+
 				this.#unsupported.add(id)
 				this.#target.log('info', `Camera didn't answer the "${id}" status inquiry; no longer polling it`)
 			}

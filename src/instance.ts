@@ -32,6 +32,15 @@ import type { Command, CommandParameters, CommandParamValues, NoCommandParameter
 import type { Answer, AnswerParameters, Inquiry } from './visca/inquiry.js'
 import { VISCAPort } from './visca/port.js'
 
+/**
+ * How long the camera gets to answer an inquiry sent by the status poller
+ * before the connection is taken for lost.  A camera that's powering on stops
+ * answering without closing the connection, so nothing else reveals the loss.
+ * Comfortably longer than the slowest answer seen from a real camera, about a
+ * second.
+ */
+const InquiryTimeoutMs = 3000
+
 export class PtzOpticsInstance extends InstanceBase<RawConfig, RawSecrets> implements StatusSource {
 	/** Configuration dictating the behavior of this instance. */
 	#config: PtzOpticsConfig = noCameraConfig()
@@ -47,7 +56,7 @@ export class PtzOpticsInstance extends InstanceBase<RawConfig, RawSecrets> imple
 	/** Polls the camera for status, if enabled in config. */
 	#poller = new StatusPoller({
 		canPoll: () => !this.#visca.closed,
-		inquire: async (inquiry) => this.#visca.sendInquiry(inquiry).catch((e: Error) => e),
+		inquire: async (inquiry) => this.#pollInquiry(inquiry),
 		setVariableValues: (values) => this.#publishStatus(values),
 		passCompleted: (answered) => {
 			// Feed the preset tracker every pass, not only when values change:
@@ -59,6 +68,40 @@ export class PtzOpticsInstance extends InstanceBase<RawConfig, RawSecrets> imple
 		},
 		log: (level, message) => this.log(level, message),
 	})
+
+	/**
+	 * Send an inquiry for the status poller.  If the camera doesn't answer it
+	 * within `InquiryTimeoutMs`, take the connection for lost and reconnect,
+	 * just as after a network error.
+	 *
+	 * @returns
+	 *    The answer; an error if the camera answered anything else; or null if
+	 *    the connection was lost before an answer came.
+	 */
+	async #pollInquiry(inquiry: Inquiry<AnswerParameters>): Promise<Answer<AnswerParameters> | Error | null> {
+		// Don't count time spent waiting for a connection against the camera.
+		try {
+			await this.#visca.connect()
+		} catch {
+			return null
+		}
+
+		let timer: ReturnType<typeof setTimeout> | undefined
+		const unanswered = new Promise<null>((resolve) => {
+			timer = setTimeout(() => {
+				this.log('warn', `Camera didn't answer a status inquiry within ${InquiryTimeoutMs} ms; reconnecting`)
+				this.#visca.close('Camera stopped answering', InstanceStatus.ConnectionFailure)
+				const { host, port } = this.#config
+				if (isValidHost(host)) this.#visca.open(host, port)
+				resolve(null)
+			}, InquiryTimeoutMs)
+		})
+		// A pending inquiry rejects when its connection closes.
+		const answered = this.#visca.sendInquiry(inquiry).catch(() => null)
+		return Promise.race([answered, unanswered]).finally(() => {
+			clearTimeout(timer)
+		})
+	}
 
 	/** Reads status from the camera's web interface, if enabled in config. */
 	#httpPoller = new HttpStatusPoller({

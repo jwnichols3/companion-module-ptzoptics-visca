@@ -17,15 +17,53 @@ type StateReplies = {
 }
 
 /**
- * How a camera answers inquiries in each power state, as plain data, so that
- * replies recorded from a real camera can be played back.
+ * One thing a camera does as it wakes from standby, and how many milliseconds
+ * after being told to power on it does it.
  */
-export type CameraReplies = { readonly [state in CameraPowerState]: StateReplies }
+export type WakeUpStep = { readonly atMs: number } & (
+	| {
+			/**
+			 * Ignore every message received from now on, on any connection,
+			 * without closing a connection.  Messages ignored are never
+			 * answered.
+			 */
+			readonly does: 'goes-silent'
+	  }
+	| { readonly does: 'drops-connection' }
+	| { readonly does: 'refuses-connections' }
+	| { readonly does: 'accepts-connections' }
+	| {
+			/** Answer inquiries this way from now on. */
+			readonly does: 'answers'
+			readonly replies: StateReplies
+			/** Bytes nothing asked for, sent straight after the next reply. */
+			readonly unsolicited: Bytes
+	  }
+)
+
+/**
+ * How a camera answers inquiries in each power state, and what it does as it
+ * wakes from standby, as plain data, so that what was recorded from a real
+ * camera can be played back.
+ */
+export type CameraReplies = { readonly [state in CameraPowerState]: StateReplies } & {
+	/**
+	 * What the camera does after it's told to power on, in order.  Once the
+	 * last step is done the camera is awake, answering as that step left it.
+	 * A camera with no steps is on, and answers so, at once.
+	 */
+	readonly wakeUp?: readonly WakeUpStep[]
+}
 
 type SimulatedCameraOptions = {
 	/** The power state of the camera when it starts. */
 	readonly power: CameraPowerState
 	readonly replies: CameraReplies
+	/**
+	 * How many times faster than its steps say the camera wakes up, to
+	 * shorten a wake-up that took a real camera half a minute.  1 if omitted.
+	 */
+	readonly wakeUpSpeed?: number
 }
 
 const PowerOnBytes = [0x81, 0x01, 0x04, 0x00, 0x02, 0xff]
@@ -53,8 +91,11 @@ function sameBytes(b1: Bytes, b2: Bytes): boolean {
  * A stand-in camera: a local TCP server that holds power state, answers each
  * inquiry with the reply given for its current power state, acknowledges and
  * completes every command, and records every message it receives.  It can
- * also be told to misbehave: to refuse or drop connections, to stall, to send
- * a reply late or garbled, and to go silent when told to power on.
+ * also be told to misbehave: to refuse or drop connections, to stall, and to
+ * send a reply late or garbled.
+ *
+ * Told to go to standby, it answers as in standby.  Told to power on, it
+ * wakes up the way its replies say a camera does, then answers as on.
  *
  * Where `RunCameraInteractionTest` scripts one exact exchange with a
  * `VISCAPort`, this keeps answering for as long as it's asked, so that a whole
@@ -66,15 +107,23 @@ export class SimulatedCamera {
 	readonly #replies: CameraReplies
 	#power: CameraPowerState
 
+	/** How the camera answers inquiries at the moment. */
+	#answers: StateReplies
+
+	readonly #wakeUpSpeed: number
+
+	/** Timers for the steps not yet done of a wake-up in progress. */
+	#wakeUpTimers: ReturnType<typeof setTimeout>[] = []
+
+	/** Bytes nothing asked for, to send straight after the next reply. */
+	#unsolicited: Bytes = []
+
 	/** What to do wrong with the replies to the next messages received, in order. */
 	readonly #replyFaults: ReplyFault[] = []
 
 	/** Messages received during a stall and not yet acted on, if stalled. */
 	#stalled: { readonly socket: net.Socket; readonly message: Bytes }[] | null = null
 	#stallTimer: ReturnType<typeof setTimeout> | null = null
-
-	/** Whether to go silent after acknowledging the next command to power on. */
-	#silentOnPowerOn = false
 
 	/** Whether the camera is ignoring every message it receives. */
 	#silent = false
@@ -85,11 +134,13 @@ export class SimulatedCamera {
 	/** Every message the camera has received, oldest first. */
 	readonly received: Bytes[] = []
 
-	private constructor(server: net.Server, port: number, { power, replies }: SimulatedCameraOptions) {
+	private constructor(server: net.Server, port: number, { power, replies, wakeUpSpeed = 1 }: SimulatedCameraOptions) {
 		this.#server = server
 		this.port = port
 		this.#power = power
 		this.#replies = replies
+		this.#answers = replies[power]
+		this.#wakeUpSpeed = wakeUpSpeed
 
 		server.on('connection', (socket: net.Socket) => {
 			this.#sockets.add(socket)
@@ -227,26 +278,9 @@ export class SimulatedCamera {
 		this.#replyFaults.push({ garbled: bytes })
 	}
 
-	/**
-	 * When next told to power on, acknowledge and complete the command, then
-	 * ignore every message received, on any connection, without closing a
-	 * connection, until `answerAgain()`.  A real camera does this for a while
-	 * as it wakes.
-	 */
-	goSilentOnPowerOn(): void {
-		this.#silentOnPowerOn = true
-	}
-
-	/**
-	 * Answer messages again after `goSilentOnPowerOn()`.  Messages received
-	 * meanwhile stay unanswered.
-	 */
-	answerAgain(): void {
-		this.#silent = false
-	}
-
 	/** Close every connection to the camera and stop listening. */
 	async stop(): Promise<void> {
+		this.#abandonWakeUp()
 		if (this.#stallTimer !== null) {
 			clearTimeout(this.#stallTimer)
 			this.#stallTimer = null
@@ -263,7 +297,11 @@ export class SimulatedCamera {
 
 	/** Act on one received message and reply to it, misbehaving as instructed. */
 	#answer(socket: net.Socket, message: Bytes): void {
-		const reply = this.#replyTo(message)
+		let reply = this.#replyTo(message)
+		if (this.#unsolicited.length > 0) {
+			reply = [...reply, ...this.#unsolicited]
+			this.#unsolicited = []
+		}
 
 		const send = (bytes: Bytes) => {
 			// The connection may have been dropped since the message arrived.
@@ -295,22 +333,81 @@ export class SimulatedCamera {
 			// Command
 			case 0x01:
 				if (sameBytes(message, PowerOnBytes)) {
-					this.#power = 'on'
-					if (this.#silentOnPowerOn) {
-						this.#silentOnPowerOn = false
-						this.#silent = true
+					if (this.#power === 'standby') {
+						this.#power = 'on'
+						this.#wakeUp()
 					}
 				} else if (sameBytes(message, PowerStandbyBytes)) {
+					this.#abandonWakeUp()
 					this.#power = 'standby'
+					this.#answers = this.#replies.standby
 				}
 				return ACKCompletion(Socket)
 			// Inquiry
 			case 0x09: {
-				const { replies, otherwise } = this.#replies[this.#power]
+				const { replies, otherwise } = this.#answers
 				return replies.find(({ inquiry }) => sameBytes(inquiry, message))?.reply ?? otherwise
 			}
 			default:
 				return SyntaxErrorBytes
 		}
+	}
+
+	/** Start doing what the camera does as it wakes from standby. */
+	#wakeUp(): void {
+		const { wakeUp = [], on } = this.#replies
+		if (wakeUp.length === 0) {
+			this.#answers = on
+			return
+		}
+
+		for (const step of wakeUp) {
+			// What the camera does at once, it does before it answers
+			// anything more.
+			if (step.atMs === 0) {
+				this.#wakeUpStep(step)
+				continue
+			}
+			this.#wakeUpTimers.push(
+				setTimeout(() => {
+					this.#wakeUpStep(step)
+				}, step.atMs / this.#wakeUpSpeed),
+			)
+		}
+	}
+
+	#wakeUpStep(step: WakeUpStep): void {
+		switch (step.does) {
+			case 'goes-silent':
+				this.#silent = true
+				break
+			case 'drops-connection':
+				this.dropConnection()
+				break
+			case 'refuses-connections':
+				this.refuseConnections()
+				break
+			case 'accepts-connections':
+				if (!this.#server.listening) {
+					// Nothing to be done if the port can't be had again.
+					this.acceptConnections().catch(() => {})
+				}
+				break
+			case 'answers':
+				this.#silent = false
+				this.#answers = step.replies
+				this.#unsolicited = step.unsolicited
+				break
+		}
+	}
+
+	/** Stop a wake-up in progress, leaving the camera answering. */
+	#abandonWakeUp(): void {
+		for (const timer of this.#wakeUpTimers) {
+			clearTimeout(timer)
+		}
+		this.#wakeUpTimers = []
+		this.#silent = false
+		this.#unsolicited = []
 	}
 }

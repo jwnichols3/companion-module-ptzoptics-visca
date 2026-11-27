@@ -4,7 +4,7 @@ import { PowerActionId } from '../actions/power.js'
 import { ModuleUnderTest } from './module-under-test.js'
 import { PollGroupId } from '../status/groups.js'
 import { CameraPowerBytes } from '../visca/__tests__/camera-interactions/bytes.js'
-import { RecordedReplies } from '../visca/__tests__/simulator/recorded-replies.js'
+import { HandWrittenCamera } from '../visca/__tests__/simulator/cameras.js'
 import { SimulatedCamera } from '../visca/__tests__/simulator/simulated-camera.js'
 
 const CameraStandbyBytes = [0x81, 0x01, 0x04, 0x00, 0x03, 0xff]
@@ -31,7 +31,7 @@ describe('camera refuses a polled inquiry while a command is sent', () => {
 	})
 
 	test('Power On pressed while a refused inquiry is unanswered: the command succeeds', async () => {
-		const camera = await SimulatedCamera.start({ power: 'standby', replies: RecordedReplies })
+		const camera = await SimulatedCamera.start({ power: 'standby', replies: HandWrittenCamera.replies })
 
 		const module = await ModuleUnderTest.start({
 			host: '127.0.0.1',
@@ -79,7 +79,7 @@ describe('camera refuses a polled inquiry while a command is sent', () => {
 		// time it checks.
 		vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
 
-		const camera = await SimulatedCamera.start({ power: 'standby', replies: RecordedReplies })
+		const camera = await SimulatedCamera.start({ power: 'standby', replies: HandWrittenCamera.replies })
 
 		const module = await ModuleUnderTest.start({
 			host: '127.0.0.1',

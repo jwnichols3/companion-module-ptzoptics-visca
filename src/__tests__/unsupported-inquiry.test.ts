@@ -1,7 +1,7 @@
 import { InstanceStatus } from '@companion-module/base'
 import { describe, expect, test, vi } from 'vitest'
 import { ModuleUnderTest } from './module-under-test.js'
-import { PowerInquiryBytes, RecordedReplies } from '../visca/__tests__/simulator/recorded-replies.js'
+import { HandWrittenCamera, PowerInquiryBytes } from '../visca/__tests__/simulator/cameras.js'
 import { SimulatedCamera } from '../visca/__tests__/simulator/simulated-camera.js'
 import type { Bytes } from '../utils/byte.js'
 
@@ -14,7 +14,7 @@ function timesReceived(camera: SimulatedCamera, message: Bytes): number {
 describe('camera lacks an inquiry', () => {
 	test('powered on: the inquiry is refused on three passes, then is no longer sent', async () => {
 		// The camera answers the exposure inquiries with a syntax error.
-		const camera = await SimulatedCamera.start({ power: 'on', replies: RecordedReplies })
+		const camera = await SimulatedCamera.start({ power: 'on', replies: HandWrittenCamera.replies })
 
 		const module = await ModuleUnderTest.start({
 			host: '127.0.0.1',

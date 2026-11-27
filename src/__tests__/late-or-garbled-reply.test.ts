@@ -1,9 +1,10 @@
 import { InstanceStatus } from '@companion-module/base'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import { PowerActionId } from '../actions/power.js'
+import { eventually } from './faked-time.js'
 import { ModuleUnderTest } from './module-under-test.js'
 import { CameraPowerBytes } from '../visca/__tests__/camera-interactions/bytes.js'
-import { PowerInquiryBytes, RecordedReplies } from '../visca/__tests__/simulator/recorded-replies.js'
+import { Cameras, PowerInquiryBytes } from '../visca/__tests__/simulator/cameras.js'
 import { SimulatedCamera } from '../visca/__tests__/simulator/simulated-camera.js'
 
 /** How long the module's socket waits after a failed attempt to connect before trying again. */
@@ -19,10 +20,13 @@ function errorsLogged(module: ModuleUnderTest): string[] {
 	return module.logs.filter(({ level }) => level === 'error').map(({ message }) => message)
 }
 
-describe('a reply from the camera arrives late or garbled', () => {
+describe.each(Cameras)('a reply from the camera arrives late or garbled: $name', ({ replies: { on, standby } }) => {
+	// How a camera wakes is for other scenarios: this one is on as soon as
+	// it's told to be.
+	const replies = { on, standby }
+
 	// Fake only the timers, not the sockets, so that lateness takes no real
-	// time.  `vi.waitFor` advances the fake timers a little every time it
-	// checks.
+	// time.  `eventually` lets faked time go by while it waits.
 	beforeEach(() => {
 		vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
 	})
@@ -34,7 +38,7 @@ describe('a reply from the camera arrives late or garbled', () => {
 	// late fails nothing: it answers its inquiry when it arrives.
 
 	test('one reply late: a Power On sent meanwhile reaches the camera, and nothing fails', async () => {
-		const camera = await SimulatedCamera.start({ power: 'standby', replies: RecordedReplies })
+		const camera = await SimulatedCamera.start({ power: 'standby', replies })
 
 		const module = await ModuleUnderTest.start({
 			host: '127.0.0.1',
@@ -43,26 +47,26 @@ describe('a reply from the camera arrives late or garbled', () => {
 			pollInterval: 100,
 		})
 		try {
-			await vi.waitFor(() => {
+			await eventually(() => {
 				expect(module.variable('power')).toBe('standby')
 			})
 
 			const receivedBefore = camera.received.length
 			camera.replyLate(Late)
-			await vi.waitFor(() => {
+			await eventually(() => {
 				expect(camera.received.length).toBeGreaterThan(receivedBefore)
 			})
 
 			// The command waits only briefly behind the unanswered inquiry.
 			await module.executeAction(PowerActionId.CameraPowerState, { bool: 'on' })
-			await vi.waitFor(() => {
+			await eventually(() => {
 				expect(camera.power).toBe('on')
 			})
 			expect(camera.received.slice(receivedBefore)).toEqual([PowerInquiryBytes, CameraPowerBytes])
 
 			// Once the late reply is in, polling carries on.
 			vi.advanceTimersByTime(Late)
-			await vi.waitFor(() => {
+			await eventually(() => {
 				expect(module.variable('power')).toBe('on')
 			})
 
@@ -75,7 +79,7 @@ describe('a reply from the camera arrives late or garbled', () => {
 	})
 
 	test('camera stalls: a Power On sent meanwhile is acted on afterward, and nothing fails', async () => {
-		const camera = await SimulatedCamera.start({ power: 'standby', replies: RecordedReplies })
+		const camera = await SimulatedCamera.start({ power: 'standby', replies })
 
 		const module = await ModuleUnderTest.start({
 			host: '127.0.0.1',
@@ -84,24 +88,24 @@ describe('a reply from the camera arrives late or garbled', () => {
 			pollInterval: 100,
 		})
 		try {
-			await vi.waitFor(() => {
+			await eventually(() => {
 				expect(module.variable('power')).toBe('standby')
 			})
 
 			const receivedBefore = camera.received.length
 			camera.stall(Late)
-			await vi.waitFor(() => {
+			await eventually(() => {
 				expect(camera.received.length).toBeGreaterThan(receivedBefore)
 			})
 
 			await module.executeAction(PowerActionId.CameraPowerState, { bool: 'on' })
-			await vi.waitFor(() => {
+			await eventually(() => {
 				expect(camera.received.slice(receivedBefore)).toEqual([PowerInquiryBytes, CameraPowerBytes])
 			})
 			expect(camera.power).toBe('standby')
 
 			vi.advanceTimersByTime(Late)
-			await vi.waitFor(() => {
+			await eventually(() => {
 				expect(module.variable('power')).toBe('on')
 			})
 			expect(camera.power).toBe('on')
@@ -118,7 +122,7 @@ describe('a reply from the camera arrives late or garbled', () => {
 	// inquiries.  A reply later than that finds its connection replaced.
 
 	test('one reply later than the time limit: the module reconnects, and the reply is never taken for an answer', async () => {
-		const camera = await SimulatedCamera.start({ power: 'standby', replies: RecordedReplies })
+		const camera = await SimulatedCamera.start({ power: 'standby', replies })
 
 		const module = await ModuleUnderTest.start({
 			host: '127.0.0.1',
@@ -127,18 +131,18 @@ describe('a reply from the camera arrives late or garbled', () => {
 			pollInterval: 100,
 		})
 		try {
-			await vi.waitFor(() => {
+			await eventually(() => {
 				expect(module.variable('power')).toBe('standby')
 			})
 
 			const receivedBefore = camera.received.length
 			camera.replyLate(2 * InquiryTimeout)
-			await vi.waitFor(() => {
+			await eventually(() => {
 				expect(camera.received.length).toBeGreaterThan(receivedBefore)
 			})
 
 			vi.advanceTimersByTime(InquiryTimeout)
-			await vi.waitFor(() => {
+			await eventually(() => {
 				expect(module.status).toBe(InstanceStatus.Ok)
 				expect(camera.received.length).toBeGreaterThan(receivedBefore + 1)
 			})
@@ -146,12 +150,12 @@ describe('a reply from the camera arrives late or garbled', () => {
 			// The camera has powered on by the time the late reply, which
 			// says standby, is sent.
 			await module.executeAction(PowerActionId.CameraPowerState, { bool: 'on' })
-			await vi.waitFor(() => {
+			await eventually(() => {
 				expect(module.variable('power')).toBe('on')
 			})
 			const receivedOn = camera.received.length
 			vi.advanceTimersByTime(InquiryTimeout)
-			await vi.waitFor(() => {
+			await eventually(() => {
 				expect(camera.received.length).toBeGreaterThan(receivedOn + 3)
 			})
 			expect(module.variable('power')).toBe('on')
@@ -175,7 +179,7 @@ describe('a reply from the camera arrives late or garbled', () => {
 	// in the expected format.  The connection is kept.
 
 	test('reply garbled into a different return message: that inquiry fails, the connection stays ok, and Power On reaches the camera', async () => {
-		const camera = await SimulatedCamera.start({ power: 'on', replies: RecordedReplies })
+		const camera = await SimulatedCamera.start({ power: 'on', replies })
 
 		const module = await ModuleUnderTest.start({
 			host: '127.0.0.1',
@@ -185,7 +189,7 @@ describe('a reply from the camera arrives late or garbled', () => {
 			pollGroups: ['power', 'position', 'lens'],
 		})
 		try {
-			await vi.waitFor(() => {
+			await eventually(() => {
 				expect(module.variable('focus_mode')).toBe('auto')
 			})
 
@@ -193,7 +197,7 @@ describe('a reply from the camera arrives late or garbled', () => {
 			camera.replyGarbled([0x90, 0x50, 0x7f, 0x7f, 0x7f, 0xff])
 
 			// Polling carries on past the garbled reply.
-			await vi.waitFor(() => {
+			await eventually(() => {
 				expect(camera.received.length).toBeGreaterThan(garbledAt + 10)
 			})
 
@@ -205,7 +209,7 @@ describe('a reply from the camera arrives late or garbled', () => {
 			expect(module.variable('focus_mode')).toBe('auto')
 
 			await module.executeAction(PowerActionId.CameraPowerState, { bool: 'on' })
-			await vi.waitFor(() => {
+			await eventually(() => {
 				expect(camera.received).toContainEqual(CameraPowerBytes)
 			})
 			expect(module.status).toBe(InstanceStatus.Ok)
@@ -219,7 +223,7 @@ describe('a reply from the camera arrives late or garbled', () => {
 	// lacks that inquiry: the status poller only stops sending an inquiry the
 	// camera refuses pass after pass.
 	test('reply garbled into a different return message: the inquiry is sent again on later passes', async () => {
-		const camera = await SimulatedCamera.start({ power: 'on', replies: RecordedReplies })
+		const camera = await SimulatedCamera.start({ power: 'on', replies })
 
 		const module = await ModuleUnderTest.start({
 			host: '127.0.0.1',
@@ -229,13 +233,13 @@ describe('a reply from the camera arrives late or garbled', () => {
 			pollGroups: ['power', 'position', 'lens'],
 		})
 		try {
-			await vi.waitFor(() => {
+			await eventually(() => {
 				expect(module.variable('focus_mode')).toBe('auto')
 			})
 
 			const garbledAt = camera.received.length
 			camera.replyGarbled([0x90, 0x50, 0x7f, 0x7f, 0x7f, 0xff])
-			await vi.waitFor(() => {
+			await eventually(() => {
 				expect(camera.received.length).toBeGreaterThan(garbledAt + 10)
 			})
 
@@ -251,7 +255,7 @@ describe('a reply from the camera arrives late or garbled', () => {
 	// unanswered.  The module gives up on it after a time limit, takes the
 	// connection for lost, and reconnects.
 	test('reply cut short before its terminator: the module reconnects and polling carries on', async () => {
-		const camera = await SimulatedCamera.start({ power: 'on', replies: RecordedReplies })
+		const camera = await SimulatedCamera.start({ power: 'on', replies })
 
 		const module = await ModuleUnderTest.start({
 			host: '127.0.0.1',
@@ -261,18 +265,18 @@ describe('a reply from the camera arrives late or garbled', () => {
 			pollGroups: ['power', 'position', 'lens'],
 		})
 		try {
-			await vi.waitFor(() => {
+			await eventually(() => {
 				expect(module.variable('focus_mode')).toBe('auto')
 			})
 
 			const garbledAt = camera.received.length
 			camera.replyGarbled([0x90, 0x50, 0x02])
-			await vi.waitFor(() => {
+			await eventually(() => {
 				expect(camera.received.length).toBeGreaterThan(garbledAt)
 			})
 
 			vi.advanceTimersByTime(InquiryTimeout)
-			await vi.waitFor(() => {
+			await eventually(() => {
 				expect(camera.received.length).toBeGreaterThan(garbledAt + 10)
 			})
 			expect(module.statuses).toEqual([
@@ -298,7 +302,7 @@ describe('a reply from the camera arrives late or garbled', () => {
 	// loop forever.  It stays closed until the user restarts the connection.
 
 	test("reply garbled into bytes that aren't a return message: the connection fails until it's restarted, then Power On reaches the camera", async () => {
-		const camera = await SimulatedCamera.start({ power: 'standby', replies: RecordedReplies })
+		const camera = await SimulatedCamera.start({ power: 'standby', replies })
 
 		const config = {
 			host: '127.0.0.1',
@@ -308,12 +312,12 @@ describe('a reply from the camera arrives late or garbled', () => {
 		}
 		let module = await ModuleUnderTest.start({ ...config })
 		try {
-			await vi.waitFor(() => {
+			await eventually(() => {
 				expect(module.variable('power')).toBe('standby')
 			})
 
 			camera.replyGarbled([0x12, 0x34, 0xff])
-			await vi.waitFor(() => {
+			await eventually(() => {
 				expect(module.status).toBe(InstanceStatus.ConnectionFailure)
 			})
 			expect(errorsLogged(module)).toEqual([
@@ -324,7 +328,7 @@ describe('a reply from the camera arrives late or garbled', () => {
 			const receivedBefore = camera.received.length
 			vi.advanceTimersByTime(10 * ReconnectInterval)
 			await module.executeAction(PowerActionId.CameraPowerState, { bool: 'on' })
-			await vi.waitFor(() => {
+			await eventually(() => {
 				expect(errorsLogged(module)).toContainEqual(
 					expect.stringMatching(/^Error processing command: Socket not open to send command /),
 				)
@@ -335,17 +339,17 @@ describe('a reply from the camera arrives late or garbled', () => {
 			// Disabling and enabling the connection restarts it.
 			await module.destroy()
 			module = await ModuleUnderTest.start({ ...config })
-			await vi.waitFor(() => {
+			await eventually(() => {
 				expect(module.variable('power')).toBe('standby')
 			})
 			expect(module.statuses).toEqual([InstanceStatus.Connecting, InstanceStatus.Ok])
 
 			await module.executeAction(PowerActionId.CameraPowerState, { bool: 'on' })
-			await vi.waitFor(() => {
+			await eventually(() => {
 				expect(camera.received).toContainEqual(CameraPowerBytes)
 			})
 			expect(camera.power).toBe('on')
-			await vi.waitFor(() => {
+			await eventually(() => {
 				expect(module.variable('power')).toBe('on')
 			})
 			expect(module.status).toBe(InstanceStatus.Ok)

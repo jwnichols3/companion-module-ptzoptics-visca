@@ -177,21 +177,37 @@ export class SimulatedCamera {
 	}
 
 	/**
+	 * Stop acting on and replying to messages until `release()`.  Messages
+	 * are still received and recorded meanwhile.
+	 */
+	hold(): void {
+		this.#stalled ??= []
+	}
+
+	/** Act on everything received since `hold()`, in order, and answer as usual again. */
+	release(): void {
+		if (this.#stallTimer !== null) {
+			clearTimeout(this.#stallTimer)
+			this.#stallTimer = null
+		}
+		const stalled = this.#stalled ?? []
+		this.#stalled = null
+		for (const { socket, message } of stalled) {
+			this.#answer(socket, message)
+		}
+	}
+
+	/**
 	 * Stop acting on and replying to messages for the given number of
 	 * milliseconds, then act on everything received meanwhile, in order.
 	 */
 	stall(ms: number): void {
-		this.#stalled ??= []
+		this.hold()
 		if (this.#stallTimer !== null) {
 			clearTimeout(this.#stallTimer)
 		}
 		this.#stallTimer = setTimeout(() => {
-			const stalled = this.#stalled ?? []
-			this.#stalled = null
-			this.#stallTimer = null
-			for (const { socket, message } of stalled) {
-				this.#answer(socket, message)
-			}
+			this.release()
 		}, ms)
 	}
 

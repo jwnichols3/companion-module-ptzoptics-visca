@@ -153,6 +153,13 @@ class PendingCommand extends PendingMessage {
 	protected readonly resolve: CommandResolve
 
 	/**
+	 * Note that the camera has given this command its initial response: an
+	 * ACK or an error.  (This is also called, redundantly, when the command's
+	 * full response has been received.)
+	 */
+	readonly receivedInitialResponse: () => void
+
+	/**
 	 * Record information for a VISCA command sent to the camera but whose full
 	 * response hasn't been received yet.
 	 *
@@ -160,6 +167,9 @@ class PendingCommand extends PendingMessage {
 	 *    The bytes of the command.
 	 * @param userDefined
 	 *    Whether the command was constructed from a user-defined byte sequence.
+	 * @param receivedInitialResponse
+	 *    A function to call when the command has received its initial
+	 *    response.  It's called at least once, and it may be called again.
 	 * @param resolve
 	 *    A handler function to use if the command executes without error or if
 	 *    the command executes with a recoverable error that doesn't indicate
@@ -168,10 +178,23 @@ class PendingCommand extends PendingMessage {
 	 *    A handler function to use if a fatal error occurred while processing
 	 *    the response to this message.
 	 */
-	constructor(bytes: Bytes, userDefined: boolean, resolve: CommandResolve, reject: MessageRejectFatally) {
-		super(bytes, userDefined, reject)
+	constructor(
+		bytes: Bytes,
+		userDefined: boolean,
+		receivedInitialResponse: () => void,
+		resolve: CommandResolve,
+		reject: MessageRejectFatally,
+	) {
+		super(bytes, userDefined, (reason: Error) => {
+			receivedInitialResponse()
+			reject(reason)
+		})
 
-		this.resolve = resolve
+		this.receivedInitialResponse = receivedInitialResponse
+		this.resolve = (result: void | Error) => {
+			receivedInitialResponse()
+			return resolve(result)
+		}
 	}
 
 	/** Resolve this command as having executed without error. */
@@ -352,6 +375,20 @@ export class VISCAPort {
 	 * command occupying the socket.  🤷
 	 */
 	readonly #waitingForCompletion: Map<number, PendingCommand[]> = new Map()
+
+	/**
+	 * The number of commands passed to `sendCommand` that haven't yet received
+	 * an initial response (an ACK or an error) or otherwise failed.  Unlike
+	 * `#waitingForInitialResponse`, this counts a command from the moment it's
+	 * passed in, before its bytes have been sent.
+	 */
+	#commandsAwaitingInitialResponse = 0
+
+	/**
+	 * Resolve functions for the promises returned by `commandsAcknowledged()`
+	 * while a command awaited its initial response.
+	 */
+	readonly #whenCommandsAcknowledged: (() => void)[] = []
 
 	/**
 	 * Create an error to throw during message/response processing.  The error
@@ -611,6 +648,27 @@ export class VISCAPort {
 	}
 
 	/**
+	 * Wait until no command sent through this port awaits its initial response
+	 * (an ACK or an error).  A command that has been acknowledged but hasn't
+	 * yet completed isn't waited for.
+	 *
+	 * A Command Not Executable error doesn't identify the message it responds
+	 * to, and it's attributed to a command awaiting its initial response in
+	 * preference to an inquiry.  A caller sending an inquiry that the camera
+	 * might answer with that error can wait on this first, so that the error
+	 * can only be attributed to the inquiry.
+	 */
+	async commandsAcknowledged(): Promise<void> {
+		if (this.#commandsAwaitingInitialResponse === 0) {
+			return
+		}
+
+		return new Promise((resolve: () => void) => {
+			this.#whenCommandsAcknowledged.push(resolve)
+		})
+	}
+
+	/**
 	 * Asynchronously yield VISCA return messages (minimal-length byte sequences
 	 * beginning with 0x90 and ending with 0xFF) read from `socket`, forever.
 	 *
@@ -784,6 +842,7 @@ export class VISCAPort {
 				}
 
 				this.#waitingForInitialResponse.splice(i, 1)
+				pendingCommand.receivedInitialResponse()
 				let socketQueue = this.#waitingForCompletion.get(socket)
 				if (socketQueue === undefined) {
 					socketQueue = []
@@ -1093,13 +1152,33 @@ export class VISCAPort {
 	): Promise<void | Error> {
 		const messageBytes = command.toBytes(...paramValues)
 		const isUserDefined = command.isUserDefined()
+
+		this.#commandsAwaitingInitialResponse++
+		let awaitingInitialResponse = true
+		const receivedInitialResponse = () => {
+			if (!awaitingInitialResponse) {
+				return
+			}
+			awaitingInitialResponse = false
+
+			this.#commandsAwaitingInitialResponse--
+			if (this.#commandsAwaitingInitialResponse === 0) {
+				for (const resolve of this.#whenCommandsAcknowledged.splice(0)) {
+					resolve()
+				}
+			}
+		}
+
 		return this.#sendMessage('command', isUserDefined, messageBytes).then(async (result: void | Error) => {
 			if (result !== undefined) {
+				receivedInitialResponse()
 				return result
 			}
 
 			return new Promise((resolve: CommandResolve, reject: MessageRejectFatally) => {
-				this.#waitingForInitialResponse.push(new PendingCommand(messageBytes, isUserDefined, resolve, reject))
+				this.#waitingForInitialResponse.push(
+					new PendingCommand(messageBytes, isUserDefined, receivedInitialResponse, resolve, reject),
+				)
 			})
 		})
 	}

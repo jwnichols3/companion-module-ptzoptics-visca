@@ -41,6 +41,26 @@ import { VISCAPort } from './visca/port.js'
  */
 const InquiryTimeoutMs = 3000
 
+/**
+ * The longest a command is held back for a polled inquiry to be answered, or
+ * a polled inquiry for commands to be acknowledged, before it's sent anyway.
+ * A camera usually answers within about 20 ms, so the wait is usually far
+ * shorter.  Short enough that a button press never feels delayed even if the
+ * camera has stopped answering.
+ */
+const OverlapWaitLimitMs = 100
+
+/** Wait for the promise to resolve, but for no longer than the given number of milliseconds. */
+async function resolvedWithin(promise: Promise<void>, ms: number): Promise<void> {
+	let timer: ReturnType<typeof setTimeout> | undefined
+	const limit = new Promise<void>((resolve) => {
+		timer = setTimeout(resolve, ms)
+	})
+	return Promise.race([promise, limit]).finally(() => {
+		clearTimeout(timer)
+	})
+}
+
 export class PtzOpticsInstance extends InstanceBase<RawConfig, RawSecrets> implements StatusSource {
 	/** Configuration dictating the behavior of this instance. */
 	#config: PtzOpticsConfig = noCameraConfig()
@@ -70,9 +90,28 @@ export class PtzOpticsInstance extends InstanceBase<RawConfig, RawSecrets> imple
 	})
 
 	/**
+	 * A promise that resolves when the inquiry the status poller is waiting on
+	 * has been answered, or can no longer be; null if there's no such inquiry.
+	 */
+	#polledInquiryAnswered: Promise<void> | null = null
+
+	/**
+	 * A promise that resolves when every command held back behind a polled
+	 * inquiry has been sent; null if no command is held back.
+	 */
+	#commandsHeldBack: Promise<void> | null = null
+
+	/**
 	 * Send an inquiry for the status poller.  If the camera doesn't answer it
 	 * within `InquiryTimeoutMs`, take the connection for lost and reconnect,
 	 * just as after a network error.
+	 *
+	 * A camera in standby refuses most inquiries with an error that doesn't
+	 * say which message it refuses, and the port attributes that error to a
+	 * command awaiting its initial response if there is one.  So don't send
+	 * the inquiry until every command sent has been acknowledged, within
+	 * `OverlapWaitLimitMs`; `sendCommand` in turn holds a command back while
+	 * the inquiry is unanswered.
 	 *
 	 * @returns
 	 *    The answer; an error if the camera answered anything else; or null if
@@ -85,6 +124,14 @@ export class PtzOpticsInstance extends InstanceBase<RawConfig, RawSecrets> imple
 		} catch {
 			return null
 		}
+
+		while (this.#commandsHeldBack !== null) {
+			await this.#commandsHeldBack
+		}
+		await resolvedWithin(this.#visca.commandsAcknowledged(), OverlapWaitLimitMs)
+
+		const { promise: inquiryAnswered, resolve: inquiryNoLongerPending } = Promise.withResolvers<void>()
+		this.#polledInquiryAnswered = inquiryAnswered
 
 		let timer: ReturnType<typeof setTimeout> | undefined
 		const unanswered = new Promise<null>((resolve) => {
@@ -100,6 +147,8 @@ export class PtzOpticsInstance extends InstanceBase<RawConfig, RawSecrets> imple
 		const answered = this.#visca.sendInquiry(inquiry).catch(() => null)
 		return Promise.race([answered, unanswered]).finally(() => {
 			clearTimeout(timer)
+			this.#polledInquiryAnswered = null
+			inquiryNoLongerPending()
 		})
 	}
 
@@ -228,24 +277,50 @@ export class PtzOpticsInstance extends InstanceBase<RawConfig, RawSecrets> imple
 			? [CommandParamValues<CmdParameters>?]
 			: [CommandParamValues<CmdParameters>]
 	): void {
-		// `sendCommand` implicitly waits for the connection to be fully
-		// established, so it's unnecessary to resolve `this.#visca.connect()`
-		// here.
 		this.#poller.noteActivity()
-		this.#visca.sendCommand(command, ...paramValues).then(
-			(result: void | Error) => {
-				if (typeof result === 'undefined') {
-					return
-				}
 
-				this.log('error', `Error processing command: ${result.message}`)
-			},
-			(reason: Error) => {
-				// Swallow the error so that execution gracefully unwinds.
-				this.log('error', `Unhandled command rejection was suppressed: ${reason}`)
+		const send = () => {
+			// `sendCommand` implicitly waits for the connection to be fully
+			// established, so it's unnecessary to resolve
+			// `this.#visca.connect()` here.
+			this.#visca.sendCommand(command, ...paramValues).then(
+				(result: void | Error) => {
+					if (typeof result === 'undefined') {
+						return
+					}
+
+					this.log('error', `Error processing command: ${result.message}`)
+				},
+				(reason: Error) => {
+					// Swallow the error so that execution gracefully unwinds.
+					this.log('error', `Unhandled command rejection was suppressed: ${reason}`)
+					return
+				},
+			)
+		}
+
+		// If the camera refuses a polled inquiry while this command awaits its
+		// initial response, the port attributes the refusal to this command
+		// (see `#pollInquiry`).  So hold the command back until the inquiry is
+		// answered, but only briefly: a camera that has stopped answering
+		// mustn't stop a command being sent.  Commands already held back go
+		// first, to keep commands in order.
+		let wait = this.#commandsHeldBack
+		if (wait === null) {
+			if (this.#polledInquiryAnswered === null) {
+				send()
 				return
-			},
-		)
+			}
+			wait = resolvedWithin(this.#polledInquiryAnswered, OverlapWaitLimitMs)
+		}
+
+		const sent = wait.then(send)
+		this.#commandsHeldBack = sent
+		void sent.then(() => {
+			if (this.#commandsHeldBack === sent) {
+				this.#commandsHeldBack = null
+			}
+		})
 	}
 
 	/**

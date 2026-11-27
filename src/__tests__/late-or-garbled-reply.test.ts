@@ -53,7 +53,7 @@ describe('a reply from the camera arrives late or garbled', () => {
 				expect(camera.received.length).toBeGreaterThan(receivedBefore)
 			})
 
-			// The command doesn't wait behind the unanswered inquiry.
+			// The command waits only briefly behind the unanswered inquiry.
 			await module.executeAction(PowerActionId.CameraPowerState, { bool: 'on' })
 			await vi.waitFor(() => {
 				expect(camera.power).toBe('on')

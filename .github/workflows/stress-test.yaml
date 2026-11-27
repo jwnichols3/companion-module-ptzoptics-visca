@@ -1,0 +1,45 @@
+name: Stress Test CI
+
+on:
+  schedule:
+    # Every day at 06:17 UTC.
+    - cron: '17 6 * * *'
+  workflow_dispatch:
+    inputs:
+      seed:
+        description: Seed for fault injection, to run a failed run again (chosen afresh if empty)
+        required: false
+
+jobs:
+  stress-test:
+    name: Stress Test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    strategy:
+      fail-fast: false
+      matrix:
+        # Stay consistent with package.json.
+        node-version: [~22.11]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Use Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+
+      - name: Prepare Environment
+        run: |
+          corepack enable
+          yarn install --immutable
+        env:
+          CI: true
+
+      - name: Run module stress tests
+        run: |
+          yarn test:stress
+        env:
+          CI: true
+          STRESS_SEED: ${{ inputs.seed }}

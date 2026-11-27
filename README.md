@@ -8,7 +8,7 @@ Executing a `yarn` command should perform all necessary steps to develop the mod
 
 First, download and install module dependencies using `yarn install`. You can then build the module using `yarn build`. The module can be loaded by Companion by adding a symlink to the module folder to the [`companion-module-dev`](https://github.com/bitfocus/companion-module-base/wiki) you specify in your Companion installation's settings. (Or you can simply clone the module into a folder inside `companion-module-dev`.)
 
-Use `yarn lint` to check code style and `yarn lint --fix` to fix mechanically-fixable formatting errors. Use `yarn test` to run module tests. The module includes a Github workflow that lints module code and runs tests when you push to Github or create a PR, so you can check lint/testing results for your pushes in the "Actions" tab of your Github repository.
+Use `yarn lint` to check code style and `yarn lint --fix` to fix mechanically-fixable formatting errors. Use `yarn test` to run module tests. Use `yarn test:stress` to run the stress tests: hours of polling and of injected faults, in compressed time, which take a minute or two. The module includes a Github workflow that lints module code and runs tests when you push to Github or create a PR, so you can check lint/testing results for your pushes in the "Actions" tab of your Github repository.
 
 Run `yarn dev` to compile module code, then watch for changes to automatically recompile it. This is a useful way to quickly test code changes as you work on them.
 

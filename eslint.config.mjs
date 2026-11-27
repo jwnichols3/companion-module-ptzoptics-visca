@@ -144,7 +144,7 @@ const customConfig = [
 	permitLimitedUnpublishedImports(allTestFilePatterns, ['vitest']),
 	permitLimitedUnpublishedImports(['eslint.config.mjs'], ['@companion-module/tools']),
 	permitLimitedUnpublishedImports(['knip.config.ts'], ['knip']),
-	permitLimitedUnpublishedImports(['vitest.config.ts'], ['vitest']),
+	permitLimitedUnpublishedImports(['vitest.config.ts', 'vitest.stress.config.ts'], ['vitest']),
 ]
 
 export default customConfig

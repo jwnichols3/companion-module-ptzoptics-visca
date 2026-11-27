@@ -3,6 +3,7 @@ import {
 	type CompanionVariableValues,
 	InstanceBase,
 	InstanceStatus,
+	type LogLevel,
 	type SomeCompanionConfigField,
 } from '@companion-module/base'
 import { getActions } from './actions/actions.js'
@@ -24,6 +25,7 @@ import { getPresets } from './presets/presets.js'
 import { pollVariableDefinitions, StatusPoller } from './status/poller.js'
 import { PresetTracker } from './status/preset-tracker.js'
 import { ZoomTarget } from './status/zoom-target.js'
+import { CameraPower, CameraPowerState } from './camera/power.js'
 import { ZoomDirect } from './camera/zoom.js'
 import { imageSetting } from './camera/image.js'
 import { WhiteBalance } from './camera/white-balance.js'
@@ -80,10 +82,108 @@ export class PtzOpticsInstance extends InstanceBase<RawConfig, RawSecrets> imple
 	/** How many connections to the camera the port has made, to tell one from the next. */
 	#connectionsMade = 0
 
+	/** The connection status last reported to Companion, if any. */
+	#statusShown: InstanceStatus | null = null
+
+	/**
+	 * Whether the camera was told to go to standby since it was last told to
+	 * power on, so that it may be in standby whatever it last said.
+	 */
+	#toldToStandby = false
+
+	/**
+	 * The wake window, while it lasts: the time after the camera acknowledged
+	 * being told to power on in which it's expected to answer nothing, and
+	 * perhaps to refuse connections.  It lasts until the camera answers a
+	 * polled inquiry, or for as long as its camera definition says a wake-up
+	 * may take.  Null at any other time.
+	 *
+	 * In the wake window a camera that can't be reached, or doesn't answer, is
+	 * taken to be waking, not lost: the connection is reported as being made,
+	 * not as failed, and one line is logged in place of a warning or an error
+	 * for each inquiry unanswered and each connection refused.
+	 */
+	#wakeWindow: {
+		/** Whether the camera has been found unreachable or silent since the connection was last reported ok. */
+		silent: boolean
+		/** Whether it's been logged that the camera is waking. */
+		said: boolean
+		readonly lasts: number
+		readonly timer: ReturnType<typeof setTimeout>
+	} | null = null
+
+	/**
+	 * Note that the camera acknowledged being told to power on when it wasn't
+	 * known to be on: the wake window starts.
+	 */
+	#wakeWindowStarts(): void {
+		this.#wakeWindowEnds()
+		const lasts = cameraDefinition(this.#config.cameraModel).wakeWindowMs
+		this.#wakeWindow = {
+			silent: false,
+			said: false,
+			lasts,
+			timer: setTimeout(() => {
+				const silent = this.#wakeWindow?.silent === true
+				this.#wakeWindow = null
+				if (!silent) return
+
+				// The camera ought to have answered by now.
+				this.log('warn', `Camera didn't answer within ${lasts / 1000} s of being told to power on`)
+				this.#showStatus(InstanceStatus.ConnectionFailure)
+			}, lasts),
+		}
+	}
+
+	#wakeWindowEnds(): void {
+		if (this.#wakeWindow === null) return
+		clearTimeout(this.#wakeWindow.timer)
+		this.#wakeWindow = null
+	}
+
+	/**
+	 * Note that the camera can't be reached or didn't answer.
+	 *
+	 * @returns
+	 *    Whether that's expected of the camera, because it's waking.
+	 */
+	#silentWhileWaking(): boolean {
+		const wakeWindow = this.#wakeWindow
+		if (wakeWindow === null) return false
+
+		wakeWindow.silent = true
+		if (!wakeWindow.said) {
+			wakeWindow.said = true
+			this.log('info', `Camera is waking: it may not answer for up to ${wakeWindow.lasts / 1000} s`)
+		}
+		return true
+	}
+
+	/**
+	 * Note that the camera answered a polled inquiry: it's awake, and it's
+	 * there and connected, whatever was last reported.
+	 */
+	#cameraAnswered(): void {
+		this.#wakeWindowEnds()
+		if (this.#connected && this.#statusShown !== InstanceStatus.Ok) {
+			this.#showStatus(InstanceStatus.Ok)
+		}
+	}
+
+	#showStatus(status: InstanceStatus, message?: string | null): void {
+		this.#statusShown = status
+		super.updateStatus(status, message)
+	}
+
 	/**
 	 * Report the connection status to Companion.  Only the port calls this,
 	 * and it reports ok when, and only when, it has made a connection: so
 	 * also keep track of the connection here.
+	 *
+	 * In the wake window, a connection the port reports failed is reported as
+	 * being made.  One the port has made anew, to a camera found silent, is
+	 * reported so too until the camera answers a polled inquiry on it, or at
+	 * once if nothing is polled.
 	 */
 	override updateStatus(status: InstanceStatus, message?: string | null): void {
 		this.#connected = status === InstanceStatus.Ok
@@ -91,7 +191,34 @@ export class PtzOpticsInstance extends InstanceBase<RawConfig, RawSecrets> imple
 			this.#connectionsMade++
 			this.#poller.noteConnected()
 		}
-		super.updateStatus(status, message)
+
+		const wakeWindow = this.#wakeWindow
+		if (wakeWindow !== null) {
+			if (status === InstanceStatus.ConnectionFailure) {
+				this.#silentWhileWaking()
+				status = InstanceStatus.Connecting
+			} else if (status === InstanceStatus.Ok) {
+				if (wakeWindow.silent && this.#poller.polling) {
+					status = InstanceStatus.Connecting
+				} else {
+					wakeWindow.silent = false
+				}
+			}
+			if (status === this.#statusShown) return
+		}
+		this.#showStatus(status, message)
+	}
+
+	/**
+	 * Log a message.  In the wake window, a network error the port logs is
+	 * what a waking camera is expected to cause, so it's logged for debugging
+	 * only.
+	 */
+	override log(level: LogLevel, message: string): void {
+		if (level === 'error' && message.startsWith('Network error: ') && this.#silentWhileWaking()) {
+			level = 'debug'
+		}
+		super.log(level, message)
 	}
 
 	/** Polls the camera for status, if enabled in config. */
@@ -183,17 +310,25 @@ export class PtzOpticsInstance extends InstanceBase<RawConfig, RawSecrets> imple
 				// Closing the connection rejects the inquiry, so settle on
 				// its being unanswered first.
 				resolve('unanswered')
-				this.log('warn', `Camera didn't answer a status inquiry within ${InquiryTimeoutMs} ms; reconnecting`)
+				if (!this.#silentWhileWaking()) {
+					this.log('warn', `Camera didn't answer a status inquiry within ${InquiryTimeoutMs} ms; reconnecting`)
+				}
 				this.#visca.close('Camera stopped answering', InstanceStatus.ConnectionFailure)
 				const { host, port } = this.#config
 				if (isValidHost(host)) this.#visca.open(host, port)
 			}, InquiryTimeoutMs)
 		})
-		return Promise.race([answered, unanswered]).finally(() => {
-			clearTimeout(timer)
-			this.#polledInquiryAnswered = null
-			inquiryNoLongerPending()
-		})
+		return Promise.race([answered, unanswered])
+			.then((result) => {
+				// Even a refusal is an answer.
+				if (result !== null && result !== 'unanswered') this.#cameraAnswered()
+				return result
+			})
+			.finally(() => {
+				clearTimeout(timer)
+				this.#polledInquiryAnswered = null
+				inquiryNoLongerPending()
+			})
 	}
 
 	/** Reads status from the camera's web interface, if enabled in config. */
@@ -321,6 +456,41 @@ export class PtzOpticsInstance extends InstanceBase<RawConfig, RawSecrets> imple
 			? [CommandParamValues<CmdParameters>?]
 			: [CommandParamValues<CmdParameters>]
 	): void {
+		this.#sendCommandThen(command, paramValues, null)
+	}
+
+	/**
+	 * Tell the camera to power on or to go to standby.
+	 *
+	 * A camera told to power on may answer nothing for a while once it has
+	 * acknowledged that, unless it was on already: see `#wakeWindow`.
+	 */
+	setPower(state: CameraPowerState): void {
+		const wakes =
+			state === CameraPowerState.On && (this.#toldToStandby || this.#status.get('power') !== CameraPowerState.On)
+		this.#toldToStandby = state === CameraPowerState.Standby
+		this.#sendCommandThen(
+			CameraPower,
+			[{ state }],
+			wakes
+				? () => {
+						this.#wakeWindowStarts()
+					}
+				: null,
+		)
+	}
+
+	/**
+	 * Send the given command to the camera as `sendCommand` does, then call
+	 * the given function, if any, once the camera has completed the command.
+	 */
+	#sendCommandThen<CmdParameters extends CommandParameters>(
+		command: Command<CmdParameters>,
+		paramValues: CmdParameters extends NoCommandParameters
+			? [CommandParamValues<CmdParameters>?]
+			: [CommandParamValues<CmdParameters>],
+		completed: (() => void) | null,
+	): void {
 		this.#poller.noteActivity()
 
 		const send = () => {
@@ -330,6 +500,7 @@ export class PtzOpticsInstance extends InstanceBase<RawConfig, RawSecrets> imple
 			this.#visca.sendCommand(command, ...paramValues).then(
 				(result: void | Error) => {
 					if (typeof result === 'undefined') {
+						completed?.()
 						return
 					}
 
@@ -449,6 +620,7 @@ export class PtzOpticsInstance extends InstanceBase<RawConfig, RawSecrets> imple
 		this.log('info', `destroying module: ${this.id}`)
 		this.#poller.stop()
 		this.#httpPoller.stop()
+		this.#wakeWindowEnds()
 		this.#visca.close('Instance is being destroyed', InstanceStatus.Disconnected)
 	}
 
@@ -501,6 +673,9 @@ export class PtzOpticsInstance extends InstanceBase<RawConfig, RawSecrets> imple
 		if (canUpdateConfigWithoutRestarting(oldConfig, config)) {
 			return
 		}
+
+		// Whatever camera is connected to next wasn't told to power on.
+		this.#wakeWindowEnds()
 
 		if (!isValidHost(this.#config.host)) {
 			this.#visca.close('no host specified', InstanceStatus.Disconnected)

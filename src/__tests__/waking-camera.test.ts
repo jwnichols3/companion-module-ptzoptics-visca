@@ -1,4 +1,4 @@
-import { InstanceStatus } from '@companion-module/base'
+import { InstanceStatus, type LogLevel } from '@companion-module/base'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import { PowerActionId } from '../actions/power.js'
 import { eventually } from './faked-time.js'
@@ -13,13 +13,17 @@ const CameraStandbyBytes = [0x81, 0x01, 0x04, 0x00, 0x03, 0xff]
 const InquiriesPerPass = 5
 
 /**
- * Longer than the module needs to notice that a camera that stopped answering
- * as it woke is answering again: a wait for an answer, then a new connection.
+ * Longer than the module needs to find that a camera it had found silent as
+ * it woke is answering again: a wait for an answer, then a new connection.
  */
 const Recovery = 10_000
 
-function errorsLogged(module: ModuleUnderTest): string[] {
-	return module.logs.filter(({ level }) => level === 'error').map(({ message }) => message)
+function logged(module: ModuleUnderTest, ...levels: LogLevel[]): string[] {
+	return module.logs.filter(({ level }) => levels.includes(level)).map(({ message }) => message)
+}
+
+function saidWaking(module: ModuleUnderTest): string[] {
+	return logged(module, 'info').filter((message) => message.startsWith('Camera is waking'))
 }
 
 /** The cameras whose wake-up was recorded. */
@@ -40,7 +44,7 @@ describe.each(CamerasRecordedWaking)('camera wakes from standby: $name', ({ repl
 	/** How long after it's told to power on the camera does the last thing it does as it wakes. */
 	const wakeUpTakes = wakeUp.at(-1)?.atMs ?? 0
 
-	test('status returns to ok without user action, nothing is taken for unsupported, values update again, and a command reaches the camera', async () => {
+	test('status is connecting while the camera is silent and never failed, one line says it is waking, values update again, and a command reaches the camera', async () => {
 		const camera = await SimulatedCamera.start({ power: 'standby', replies })
 
 		const module = await ModuleUnderTest.start({
@@ -63,10 +67,12 @@ describe.each(CamerasRecordedWaking)('camera wakes from standby: $name', ({ repl
 			expect(camera.received).toContainEqual(CameraPowerBytes)
 
 			// A waking camera may stop answering, refuse connections, and
-			// send answers nothing asked for.  The module can't tell a camera
-			// that has stopped answering from one that's gone, so the
-			// connection may be lost meanwhile.  It must be ok again, and
-			// values must update again, with no help from the user.
+			// send answers nothing asked for.  That's expected of a camera
+			// just told to power on, so the connection is shown as being
+			// made, not as failed, until the camera answers.
+			await eventually(() => {
+				expect(module.status).toBe(InstanceStatus.Connecting)
+			})
 			await eventually(() => {
 				expect(module.variable('power')).toBe('on')
 			}, wakeUpTakes + Recovery)
@@ -74,9 +80,6 @@ describe.each(CamerasRecordedWaking)('camera wakes from standby: $name', ({ repl
 				expect(typeof module.variable('zoom')).toBe('number')
 				expect(typeof module.variable('focus_mode')).toBe('string')
 			})
-			expect(module.status).toBe(InstanceStatus.Ok)
-			expect(module.statuses).not.toContain(InstanceStatus.UnknownError)
-			expect(module.statuses).not.toContain(InstanceStatus.Disconnected)
 
 			// The wake-up cost no inquiry: every one is asked again, pass
 			// after pass, and the connection stays ok.
@@ -86,17 +89,32 @@ describe.each(CamerasRecordedWaking)('camera wakes from standby: $name', ({ repl
 			})
 			expect(new Set(camera.received.slice(receivedAwake).map(String)).size).toBe(InquiriesPerPass)
 			expect(module.logs.filter(({ message }) => message.includes('no longer polling'))).toEqual([])
-			expect(module.status).toBe(InstanceStatus.Ok)
-			expect(errorsLogged(module)).toEqual(
-				errorsLogged(module).filter((message) => /^Network error: connect ECONNREFUSED/.test(message)),
-			)
+
+			expect(module.statuses).toEqual([
+				InstanceStatus.Connecting,
+				InstanceStatus.Ok,
+				InstanceStatus.Connecting,
+				InstanceStatus.Ok,
+			])
+			expect(saidWaking(module)).toHaveLength(1)
+			expect(logged(module, 'warn', 'error')).toEqual([])
+
+			// The camera has woken, so a connection lost now has failed.
+			camera.dropConnection()
+			await eventually(() => {
+				expect(module.statuses.slice(4)).toEqual([
+					InstanceStatus.ConnectionFailure,
+					InstanceStatus.Connecting,
+					InstanceStatus.Ok,
+				])
+			})
 
 			await module.executeAction(PowerActionId.CameraPowerState, { bool: 'off' })
 			await eventually(() => {
 				expect(module.variable('power')).toBe('standby')
 			})
 			expect(camera.received).toContainEqual(CameraStandbyBytes)
-			expect(module.status).toBe(InstanceStatus.Ok)
+			expect(module.statuses).toHaveLength(7)
 		} finally {
 			await module.destroy()
 			await camera.stop()

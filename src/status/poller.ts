@@ -127,6 +127,11 @@ export class StatusPoller {
 		}
 	}
 
+	/** Whether inquiries are being sent, pass after pass. */
+	get polling(): boolean {
+		return this.#running
+	}
+
 	/** Stop polling.  Any pass in progress finishes without scheduling another. */
 	stop(): void {
 		this.#running = false

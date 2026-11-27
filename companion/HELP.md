@@ -26,6 +26,8 @@ Turn on **Poll camera status** in the connection settings to have the module ask
 
 **Camera model** tells the module which of these the camera can answer, so it never asks for the rest. Leave it at **Generic VISCA** if your camera isn't listed: the module then asks for everything in the groups you chose, and if the camera doesn't answer one of these inquiries, logs it once and stops asking for that value. While a Generic VISCA camera is in standby, only `power` is polled. A **PTZOptics 20X (F64.HI)** answers everything in standby too, so everything you chose goes on being polled: positions then show where the camera is parked.
 
+A camera may answer nothing for a while after **Power Camera: On**, and may refuse connections. For as long as the camera model says a wake-up can take (45 seconds for the PTZOptics 20X (F64.HI), 60 for Generic VISCA), the module expects that: the connection shows as connecting rather than failed, and the log says once that the camera is waking. If the camera still hasn't answered by then, the connection shows as failed.
+
 `zoom_pct` needs the zoom position at full telephoto. Leave that setting at 0 to use the position for the camera model (16384 for Generic VISCA), or enter your camera's own.
 
 ## Status from the camera web interface (optional)

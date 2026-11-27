@@ -16,8 +16,8 @@ const InquiriesPerPass = 5
 const WakeUpSpeed = 20
 
 /**
- * Longer than the module needs to notice that a camera that stopped answering
- * as it woke is answering again: a wait for an answer, then a new connection.
+ * Longer than the module needs to find that a camera it had found silent as
+ * it woke is answering again: a wait for an answer, then a new connection.
  */
 const Recovery = 10_000
 
@@ -31,14 +31,14 @@ describe.each(Cameras)('camera on, sent to standby, then powered on: $name', ({ 
 		vi.useRealTimers()
 	})
 
-	// A camera may stop answering, or drop the connection, as it wakes.  The
-	// module can't tell that from a camera that's gone, so the connection is
-	// lost then, and must come back without the user doing anything.  If the
-	// camera does neither, the connection must stay ok throughout.
+	// A camera may stop answering, or drop the connection, as it wakes.  That's
+	// expected of a camera just told to power on, so the connection is shown
+	// as being made, not as failed, until the camera answers.  If the camera
+	// does neither, the connection must stay ok throughout.
 	const wakeUp = replies.wakeUp ?? []
 	const unreachableWaking = wakeUp.some(({ does }) => does === 'goes-silent' || does === 'drops-connection')
 
-	test('connection is lost only if the camera stops answering as it wakes, is ok again unaided, and values update again', async () => {
+	test('connection is never failed, is connecting only while the camera stops answering as it wakes, and values update again', async () => {
 		const camera = await SimulatedCamera.start({ power: 'on', replies, wakeUpSpeed: WakeUpSpeed })
 
 		const module = await ModuleUnderTest.start({
@@ -94,13 +94,16 @@ describe.each(Cameras)('camera on, sent to standby, then powered on: $name', ({ 
 			expect(module.logs.filter(({ message }) => message.includes('no longer polling'))).toEqual([])
 			expect(typeof module.variable('zoom')).toBe('number')
 
-			expect(module.status).toBe(InstanceStatus.Ok)
 			const statusesSincePowerOn = module.statuses.slice(2)
+			const saidWaking = module.logs.filter(({ message }) => message.startsWith('Camera is waking'))
 			if (unreachableWaking) {
-				expect(statusesSincePowerOn.slice(0, 2)).toEqual([InstanceStatus.ConnectionFailure, InstanceStatus.Connecting])
+				expect(statusesSincePowerOn).toEqual([InstanceStatus.Connecting, InstanceStatus.Ok])
+				expect(saidWaking).toHaveLength(1)
 			} else {
 				expect(statusesSincePowerOn).toEqual([])
+				expect(saidWaking).toEqual([])
 			}
+			expect(module.logs.filter(({ level }) => level === 'warn' || level === 'error')).toEqual([])
 		} finally {
 			await module.destroy()
 			await camera.stop()

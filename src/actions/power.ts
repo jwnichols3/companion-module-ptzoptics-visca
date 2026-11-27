@@ -1,6 +1,6 @@
 import type { ActionDefinitions } from './actionid.js'
 import type { PtzOpticsInstance } from '../instance.js'
-import { CameraPower, CameraPowerState } from '../camera/power.js'
+import { CameraPowerState } from '../camera/power.js'
 import { optionConversions } from './option-conversion.js'
 
 export const PowerActionId = {
@@ -39,7 +39,7 @@ export function powerActions(instance: PtzOpticsInstance): ActionDefinitions<Pow
 			],
 			callback: async ({ options }) => {
 				const state = getPowerState(options)
-				instance.sendCommand(CameraPower, { state })
+				instance.setPower(state)
 			},
 		},
 	}

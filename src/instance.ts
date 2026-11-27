@@ -36,13 +36,26 @@ import type { Answer, AnswerParameters, Inquiry } from './visca/inquiry.js'
 import { VISCAPort } from './visca/port.js'
 
 /**
- * How long the camera gets to answer an inquiry sent by the status poller
- * before the connection is taken for lost.  A camera that's powering on stops
- * answering without closing the connection, so nothing else reveals the loss.
- * Comfortably longer than the slowest answer seen from a real camera, about a
- * second.
+ * How long the camera gets to answer anything at all, once it's been sent an
+ * inquiry by the status poller, before the connection is taken for lost.  A
+ * camera that's powering on stops answering without closing the connection,
+ * so nothing else reveals the loss.  Comfortably longer than the slowest
+ * answer seen from a real camera, about a second.
  */
 const InquiryTimeoutMs = 3000
+
+/**
+ * How long the camera gets to answer an inquiry sent by the status poller
+ * before it's sent another, a probe, to find out whether it ignored the first.
+ * Some cameras send nothing in reply to an inquiry they don't have.
+ *
+ * A camera answers in order, so nothing is lost by probing early: if the
+ * first inquiry is only being answered slowly, its answer arrives ahead of the
+ * probe's and is used all the same.  So this needs only be longer than most
+ * answers take, to spare the camera a probe it doesn't need.  Answers seen
+ * from real cameras took 10 to 20 ms, and now and then about 350 ms.
+ */
+const InquiryProbeAfterMs = 500
 
 /**
  * The longest a command is held back for a polled inquiry to be answered, or
@@ -52,6 +65,22 @@ const InquiryTimeoutMs = 3000
  * camera has stopped answering.
  */
 export const OverlapWaitLimitMs = 100
+
+/**
+ * Resolve what the promise resolves, or `'unanswered'` if it hasn't resolved
+ * within the given number of milliseconds.
+ */
+async function unlessUnansweredWithin<T>(promise: Promise<T>, ms: number): Promise<T | 'unanswered'> {
+	let timer: ReturnType<typeof setTimeout> | undefined
+	const limit = new Promise<'unanswered'>((resolve) => {
+		timer = setTimeout(() => {
+			resolve('unanswered')
+		}, ms)
+	})
+	return Promise.race([promise, limit]).finally(() => {
+		clearTimeout(timer)
+	})
+}
 
 /** Wait for the promise to resolve, but for no longer than the given number of milliseconds. */
 async function resolvedWithin(promise: Promise<void>, ms: number): Promise<void> {
@@ -224,7 +253,7 @@ export class PtzOpticsInstance extends InstanceBase<RawConfig, RawSecrets> imple
 	/** Polls the camera for status, if enabled in config. */
 	#poller = new StatusPoller({
 		canPoll: () => !this.#visca.closed,
-		inquire: async (inquiry) => this.#pollInquiry(inquiry),
+		inquire: async (inquiry, probe) => this.#pollInquiry(inquiry, probe),
 		setVariableValues: (values) => this.#publishStatus(values),
 		passCompleted: (answered) => {
 			// Feed the preset tracker every pass, not only when values change:
@@ -250,9 +279,18 @@ export class PtzOpticsInstance extends InstanceBase<RawConfig, RawSecrets> imple
 	#commandsHeldBack: Promise<void> | null = null
 
 	/**
-	 * Send an inquiry for the status poller.  If the camera doesn't answer it
-	 * within `InquiryTimeoutMs` of its being sent, take the connection for
-	 * lost and reconnect, just as after a network error.
+	 * Send an inquiry for the status poller.
+	 *
+	 * If the camera doesn't answer it within `InquiryProbeAfterMs` of its
+	 * being sent, find out whether the camera is still there by sending it
+	 * `probe`, if there is one.  The port tells an answer to the one from an
+	 * answer to the other, and the camera answers in order: so an answer to
+	 * the probe shows that the camera ignored the inquiry, and the connection
+	 * is kept.
+	 *
+	 * If the camera answers nothing within `InquiryTimeoutMs` of the inquiry's
+	 * being sent, take the connection for lost and reconnect, just as after a
+	 * network error.
 	 *
 	 * A camera in standby refuses most inquiries with an error that doesn't
 	 * say which message it refuses, and the port attributes that error to a
@@ -261,15 +299,23 @@ export class PtzOpticsInstance extends InstanceBase<RawConfig, RawSecrets> imple
 	 * `OverlapWaitLimitMs`; `sendCommand` in turn holds a command back while
 	 * the inquiry is unanswered.
 	 *
+	 * @param inquiry
+	 *    The inquiry to send.
+	 * @param probe
+	 *    An inquiry the camera is expected to answer, whose answer can't be
+	 *    mistaken for an answer to `inquiry`; or null if there's none, and
+	 *    then an inquiry the camera ignores can't be told from a camera gone.
 	 * @returns
 	 *    The answer; an error if the camera answered anything else;
-	 *    `'unanswered'` if the camera was sent the inquiry and didn't answer
-	 *    it in time; or null if the connection was lost before the inquiry
-	 *    could be sent or an answer came.
+	 *    `'ignored'` if the camera answered the probe and not the inquiry;
+	 *    `'unanswered'` if the camera was sent the inquiry and answered
+	 *    nothing in time; or null if the connection was lost before the
+	 *    inquiry could be sent or an answer came.
 	 */
 	async #pollInquiry(
 		inquiry: Inquiry<AnswerParameters>,
-	): Promise<Answer<AnswerParameters> | Error | 'unanswered' | null> {
+		probe: Inquiry<AnswerParameters> | null,
+	): Promise<Answer<AnswerParameters> | Error | 'ignored' | 'unanswered' | null> {
 		// Don't count time spent waiting for a connection against the camera.
 		try {
 			await this.#visca.connect()
@@ -291,44 +337,61 @@ export class PtzOpticsInstance extends InstanceBase<RawConfig, RawSecrets> imple
 
 		const { promise: inquiryAnswered, resolve: inquiryNoLongerPending } = Promise.withResolvers<void>()
 		this.#polledInquiryAnswered = inquiryAnswered
+		try {
+			// With a connection made, the port writes the inquiry's bytes to
+			// it before `sendInquiry` returns, so the camera's time starts
+			// now.  A pending inquiry rejects when its connection closes.
+			const answered = this.#visca.sendInquiry(inquiry).catch(() => null)
+			let result: Answer<AnswerParameters> | Error | 'ignored' | 'unanswered' | null = await unlessUnansweredWithin(
+				answered,
+				probe === null ? InquiryTimeoutMs : InquiryProbeAfterMs,
+			)
 
-		// With a connection made, the port writes the inquiry's bytes to it
-		// before `sendInquiry` returns, so the camera's time starts now.
-		// A pending inquiry rejects when its connection closes.
-		const answered = this.#visca.sendInquiry(inquiry).catch(() => null)
-		let timer: ReturnType<typeof setTimeout> | undefined
-		const unanswered = new Promise<'unanswered' | null>((resolve) => {
-			timer = setTimeout(() => {
+			if (result === 'unanswered' && probe !== null) {
+				await resolvedWithin(this.#visca.commandsAcknowledged(), OverlapWaitLimitMs)
+				if (this.#connected && connection === this.#connectionsMade) {
+					this.#visca.abandonInquiry(inquiry)
+					const probed = await unlessUnansweredWithin(
+						this.#visca.sendInquiry(probe).catch(() => null),
+						InquiryTimeoutMs - InquiryProbeAfterMs,
+					)
+					if (probed !== null && probed !== 'unanswered') {
+						// The port settled the inquiry before the probe:
+						// with its answer if that came late, ahead of the
+						// probe's, and with an error if not.
+						const late = await answered
+						result = late === null || late instanceof Error ? 'ignored' : late
+					} else {
+						// The connection was lost, or the camera is gone.
+						result = probed
+					}
+				}
+			}
+
+			if (result === 'unanswered') {
 				// Leave alone a connection the inquiry wasn't sent on: the
 				// module may have been destroyed or given another camera
 				// since.
 				if (!this.#connected || connection !== this.#connectionsMade) {
-					resolve(null)
-					return
+					return null
 				}
 
-				// Closing the connection rejects the inquiry, so settle on
-				// its being unanswered first.
-				resolve('unanswered')
 				if (!this.#silentWhileWaking()) {
 					this.log('warn', `Camera didn't answer a status inquiry within ${InquiryTimeoutMs} ms; reconnecting`)
 				}
 				this.#visca.close('Camera stopped answering', InstanceStatus.ConnectionFailure)
 				const { host, port } = this.#config
 				if (isValidHost(host)) this.#visca.open(host, port)
-			}, InquiryTimeoutMs)
-		})
-		return Promise.race([answered, unanswered])
-			.then((result) => {
-				// Even a refusal is an answer.
-				if (result !== null && result !== 'unanswered') this.#cameraAnswered()
 				return result
-			})
-			.finally(() => {
-				clearTimeout(timer)
-				this.#polledInquiryAnswered = null
-				inquiryNoLongerPending()
-			})
+			}
+
+			// Even a refusal is an answer, and so is an answer to the probe.
+			if (result !== null) this.#cameraAnswered()
+			return result
+		} finally {
+			this.#polledInquiryAnswered = null
+			inquiryNoLongerPending()
+		}
 	}
 
 	/** Reads status from the camera's web interface, if enabled in config. */

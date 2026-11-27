@@ -318,6 +318,10 @@ async function verifyInteractions(
 					sentInquiries.push({ inquiry: clientViscaPort.sendInquiry(inquiry), id })
 					break
 				}
+				case 'abandon-camera-inquiry': {
+					clientViscaPort.abandonInquiry(interaction.inquiry)
+					break
+				}
 				case 'camera-expect-incoming-bytes': {
 					const { bytes: expectedBytes } = interaction
 					LOG(`Camera receiving ${expectedBytes.length} bytes`)

@@ -204,6 +204,12 @@ class PendingInquiry<Parameters extends AnswerParameters> extends PendingMessage
 	readonly expectedReturn: AnswerMessage<AnswerParameters>
 
 	/**
+	 * Whether the inquiry was abandoned: the camera may have ignored it, and
+	 * may never respond to it.  See `VISCAPort.abandonInquiry`.
+	 */
+	abandoned = false
+
+	/**
 	 * Record information for a VISCA inquiry sent to the camera that hasn't
 	 * yet received a response.
 	 *
@@ -902,6 +908,10 @@ export class VISCAPort {
 				// Inquiry response:
 				//   90 50 ...one or more non-FF bytes...  FF
 
+				if (this.#settledAbandonedInquiries(returnMessage)) {
+					continue
+				}
+
 				const result = this.#findFirstInquiryWaitingForInitialResponse()
 				if (result === undefined) {
 					if (this.#ignoredAsUnsolicited('inquiry response', returnMessage)) {
@@ -1121,6 +1131,110 @@ export class VISCAPort {
 
 		this.#instance.log('debug', `Ignoring unsolicited ${kind} ${prettyBytes(returnMessage)}`)
 		return true
+	}
+
+	/**
+	 * Abandon the oldest pending inquiry that was sent as `inquiry`, if there
+	 * is one: stop taking for granted that the next inquiry response is its
+	 * response.
+	 *
+	 * Some cameras send nothing at all in response to an inquiry they don't
+	 * support.  Responses don't identify the inquiry they respond to, so
+	 * they're matched to pending inquiries in the order the inquiries were
+	 * sent -- and the response to the next inquiry sent would be taken as the
+	 * response to an inquiry the camera ignored.
+	 *
+	 * A camera responds to inquiries in the order it received them.  So after
+	 * abandoning an inquiry, send another whose answer can't be mistaken for
+	 * an answer to the abandoned inquiry, and that the camera is known to
+	 * answer.  Then the first inquiry response to arrive settles the
+	 * abandoned inquiry:
+	 *
+	 *   * If it's an answer to the abandoned inquiry and not to the later one,
+	 *     the abandoned inquiry was only answered late, and resolves that
+	 *     answer.  The later inquiry's response follows.
+	 *   * If it's an answer to the later inquiry and not to the abandoned one,
+	 *     the camera ignored the abandoned inquiry, which resolves an error.
+	 *     The later inquiry resolves the answer.
+	 *   * If it could be an answer to either, it's taken to answer neither.
+	 *     The abandoned inquiry resolves an error and the later inquiry
+	 *     remains pending.
+	 *
+	 * In every other respect an abandoned inquiry is pending as any other
+	 * inquiry is until it's settled.  (An error response is still its
+	 * response if it's the oldest inquiry pending, and it's rejected if the
+	 * port is closed.)
+	 *
+	 * @param inquiry
+	 *    The inquiry to abandon, as it was passed to `sendInquiry`.  If no
+	 *    such inquiry is pending (including if its bytes are still being
+	 *    sent), this does nothing.
+	 */
+	abandonInquiry<Parameters extends AnswerParameters>(inquiry: Inquiry<Parameters>): void {
+		const inquiryBytes = inquiry.toBytes()
+		for (const message of this.#waitingForInitialResponse) {
+			if (message.type !== 'inquiry') {
+				continue
+			}
+
+			const pendingInquiry = message as PendingInquiry<AnswerParameters>
+			if (
+				!pendingInquiry.abandoned &&
+				pendingInquiry.bytes.length === inquiryBytes.length &&
+				pendingInquiry.bytes.every((b: number, i: number) => b === inquiryBytes[i])
+			) {
+				pendingInquiry.abandoned = true
+				return
+			}
+		}
+	}
+
+	/**
+	 * Settle every abandoned inquiry that the given inquiry response shows
+	 * was ignored by the camera, or that it leaves unable to be answered: see
+	 * `abandonInquiry`.
+	 *
+	 * @returns
+	 *    Whether the response was used up in doing so, because it couldn't be
+	 *    told whose response it is.  If not, the response is that of the
+	 *    first inquiry now pending.
+	 */
+	#settledAbandonedInquiries(returnMessage: Bytes): boolean {
+		for (;;) {
+			const result = this.#findFirstInquiryWaitingForInitialResponse()
+			if (result === undefined || !result.pendingInquiry.abandoned) {
+				return false
+			}
+			const { i, pendingInquiry } = result
+
+			// With no later inquiry that the response could be an answer to,
+			// it's this inquiry's response as if this inquiry had never been
+			// abandoned.
+			const answersLaterInquiry = this.#waitingForInitialResponse
+				.slice(i + 1)
+				.some(
+					(message: PendingMessage) =>
+						message.type === 'inquiry' &&
+						returnMatches(returnMessage, (message as PendingInquiry<AnswerParameters>).expectedReturn),
+				)
+			if (!answersLaterInquiry) {
+				return false
+			}
+
+			this.#waitingForInitialResponse.splice(i, 1)
+			if (returnMatches(returnMessage, pendingInquiry.expectedReturn)) {
+				pendingInquiry.nonfatalError(
+					`The response ${prettyBytes(returnMessage)} could answer the abandoned inquiry ` +
+						`${prettyBytes(pendingInquiry.bytes)} or an inquiry sent after it, so it's taken to answer neither.`,
+				)
+				return true
+			}
+
+			pendingInquiry.nonfatalError(
+				`The camera sent no answer to the abandoned inquiry ${prettyBytes(pendingInquiry.bytes)} ` +
+					'before it answered an inquiry sent after it.',
+			)
+		}
 	}
 
 	// The next two functions are almost unifiable into one, but it would

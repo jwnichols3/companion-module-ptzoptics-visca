@@ -27,6 +27,11 @@ type SendCameraInquiry = {
 	readonly id: string
 }
 
+type AbandonCameraInquiry = {
+	readonly type: 'abandon-camera-inquiry'
+	readonly inquiry: Inquiry<AnswerParameters>
+}
+
 type CameraIncomingBytes = {
 	readonly type: 'camera-expect-incoming-bytes'
 	readonly bytes: Bytes
@@ -116,6 +121,7 @@ type CommandsAreNotAcknowledged = {
 export type Interaction =
 	| SendCameraCommand
 	| SendCameraInquiry
+	| AbandonCameraInquiry
 	| CameraIncomingBytes
 	| CameraReply
 	| CommandSuccess
@@ -188,6 +194,24 @@ export function SendInquiry<Parameters extends AnswerParameters>(
 	id: string,
 ): SendCameraInquiry {
 	return { type: 'send-camera-inquiry', inquiry, id }
+}
+
+/**
+ * Abandon, through the VISCA port, the oldest pending inquiry that was sent
+ * as the given one.  (The result of the abandoned inquiry must still be
+ * expected.)
+ *
+ * Be careful to perform this only after the inquiry's bytes have been expected
+ * by the camera!  Until its bytes are sent an inquiry isn't pending, and
+ * abandoning it does nothing.
+ *
+ * @param inquiry
+ *    The inquiry that was passed to `SendInquiry`.
+ */
+export function AbandonInquiry<Parameters extends AnswerParameters>(
+	inquiry: Inquiry<Parameters>,
+): AbandonCameraInquiry {
+	return { type: 'abandon-camera-inquiry', inquiry }
 }
 
 /**

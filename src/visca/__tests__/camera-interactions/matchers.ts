@@ -39,3 +39,8 @@ export const InquiryResponseIncompatibleMatcher =
 	/^Inquiry .* received the response .* which isn't compatible with the expected format/
 export const CommandBufferFullMatcher = /^Command buffer full: .* was not executed$/
 export const NoMessagesAwaitingInitialResponseMatcher = /^Unexpected error with no messages awaiting initial response/
+
+export const AbandonedInquiryIgnoredMatcher =
+	/^The camera sent no answer to the abandoned inquiry .* before it answered an inquiry sent after it/
+export const AbandonedInquiryAmbiguousMatcher =
+	/^The response .* could answer the abandoned inquiry .* or an inquiry sent after it, so it's taken to answer neither/

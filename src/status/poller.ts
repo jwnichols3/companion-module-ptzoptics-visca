@@ -8,12 +8,20 @@ export interface PollTarget {
 	/** Whether a connection to the camera exists or is being established. */
 	canPoll(): boolean
 	/**
-	 * Send an inquiry, without logging.  Resolves its answer; an error if the
-	 * camera answered anything else; `'unanswered'` if the camera was sent
-	 * the inquiry and answered nothing in time; or null if the connection was
-	 * lost before the inquiry could be sent or an answer came.
+	 * Send an inquiry, without logging.  If the camera doesn't answer it
+	 * promptly, `probe`, if not null, is sent to find out whether the camera
+	 * is still there.
+	 *
+	 * Resolves the inquiry's answer; an error if the camera answered anything
+	 * else; `'ignored'` if the camera was sent the inquiry and answered the
+	 * probe sent after it, not the inquiry; `'unanswered'` if the camera was
+	 * sent the inquiry and answered nothing in time; or null if the
+	 * connection was lost before the inquiry could be sent or an answer came.
 	 */
-	inquire(inquiry: Inquiry<AnswerParameters>): Promise<Answer<AnswerParameters> | Error | 'unanswered' | null>
+	inquire(
+		inquiry: Inquiry<AnswerParameters>,
+		probe: Inquiry<AnswerParameters> | null,
+	): Promise<Answer<AnswerParameters> | Error | 'ignored' | 'unanswered' | null>
 	setVariableValues(values: CompanionVariableValues): void
 	/** Called after each pass with whether the camera answered anything. */
 	passCompleted(answered: boolean): void
@@ -68,16 +76,26 @@ export function pollVariableDefinitions(groups: readonly PollGroupId[]): Compani
  * unreachable, so that pass counts against nothing.  Nor does losing the
  * connection count against the inquiry that was waiting on it.
  *
+ * Some cameras ignore an inquiry they don't support, sending nothing in
+ * reply.  So each inquiry is sent with a probe to follow it if it isn't
+ * answered promptly: another polled inquiry, one the camera has answered if
+ * there is one, whose answer can't be mistaken for an answer to the first.
+ * A camera that answers the probe is there, and ignored the inquiry: that
+ * counts against the inquiry whatever else the pass holds, and the pass
+ * carries on.
+ *
  * Once the camera reports standby in a pass, only the inquiries the
  * definition says it answers in standby are sent in the rest of that pass,
  * and no refusal in that pass counts against anything.  Nor does a refusal
  * while the camera is waking: until it has been seen on for `WakingWindowMs`
  * since it connected, or since it left standby.
  *
- * A pass ends early if an inquiry goes unanswered or the connection is lost.
- * An inquiry that went unanswered is asked last in later passes, until it's
+ * A pass ends early if the camera answers nothing to an inquiry, nor to its
+ * probe if it has one, or the connection is lost.  An inquiry that went
+ * unanswered or was ignored is asked last in later passes, until it's
  * answered, so that a camera that ignores it can still show, by answering
- * the others first, that it's there.
+ * the others first, that it's there, and so that what it does answer isn't
+ * kept waiting.
  */
 export class StatusPoller {
 	readonly #target: PollTarget
@@ -92,8 +110,10 @@ export class StatusPoller {
 	#unsupported = new Set<string>()
 	/** How many passes in a row each inquiry has failed in, if any. */
 	#refusals = new Map<string, number>()
-	/** The inquiries that went unanswered when last sent. */
+	/** The inquiries that went unanswered, or were ignored, when last sent. */
 	#unanswered = new Set<string>()
+	/** The inquiries the camera has answered since settings changed. */
+	#answered = new Set<string>()
 	/**
 	 * Whether the camera is known to be on, and for how long: `'waking'` from
 	 * when it's first seen on until `WakingWindowMs` later.
@@ -120,6 +140,7 @@ export class StatusPoller {
 		this.#unsupported.clear()
 		this.#refusals.clear()
 		this.#unanswered.clear()
+		this.#answered.clear()
 		this.#lastValues.clear()
 		if (settings.enabled && this.#inquiries.length > 0) {
 			this.#running = true
@@ -182,6 +203,31 @@ export class StatusPoller {
 		}
 	}
 
+	/**
+	 * Choose the probe to follow the given inquiry if the camera doesn't
+	 * answer it promptly: a polled inquiry that the camera can be expected to
+	 * answer, and whose answer is of another length, so that it can't be
+	 * mistaken for an answer to the given inquiry.  One the camera has
+	 * answered is preferred: power, usually.
+	 *
+	 * @param standby
+	 *    Whether the camera may be in standby, when it can only be expected
+	 *    to answer what its definition says it answers then.
+	 * @returns
+	 *    The probe, or null if no polled inquiry will do.
+	 */
+	#probeFor(polled: PolledInquiry, standby: boolean): Inquiry<AnswerParameters> | null {
+		const answerLength = ({ inquiry }: PolledInquiry) => inquiry.answer().bytes.length
+		const probes = this.#inquiries.filter(
+			(probe) =>
+				!this.#unsupported.has(probe.id) &&
+				!this.#unanswered.has(probe.id) &&
+				(!standby || this.#settings.camera.standby.includes(probe.id)) &&
+				answerLength(probe) !== answerLength(polled),
+		)
+		return (probes.find(({ id }) => this.#answered.has(id)) ?? probes.at(0))?.inquiry ?? null
+	}
+
 	/** Run one pass now (also usable when polling is disabled). */
 	async pollOnce(): Promise<void> {
 		if (!this.#target.canPoll()) return
@@ -189,6 +235,7 @@ export class StatusPoller {
 		const { camera, zoomMax } = this.#settings
 		const ctx = { zoomMax }
 		const refused: PolledInquiry[] = []
+		const ignored: PolledInquiry[] = []
 		let unanswered: PolledInquiry | null = null
 		let connectionLost = false
 		let succeeded = 0
@@ -204,7 +251,12 @@ export class StatusPoller {
 			if (this.#unsupported.has(polled.id)) continue
 			if (standby && !camera.standby.includes(polled.id)) continue
 
-			const result = await this.#target.inquire(polled.inquiry)
+			const probe = this.#probeFor(polled, standby || this.#lastValues.get('power') === 'standby')
+			const result = await this.#target.inquire(polled.inquiry, probe)
+			if (result === 'ignored') {
+				ignored.push(polled)
+				continue
+			}
 			if (result === null || result === 'unanswered') {
 				// The rest of the pass would only wait on the new connection.
 				if (result === 'unanswered') unanswered = polled
@@ -219,6 +271,7 @@ export class StatusPoller {
 			succeeded++
 			this.#refusals.delete(polled.id)
 			this.#unanswered.delete(polled.id)
+			this.#answered.add(polled.id)
 			const values = polled.toValues(result, ctx)
 			for (const [id, value] of Object.entries(values)) {
 				if (this.#lastValues.get(id) !== value) {
@@ -239,30 +292,33 @@ export class StatusPoller {
 			this.#seenOn()
 		}
 
+		for (const { id } of ignored) this.#unanswered.add(id)
 		if (unanswered !== null) this.#unanswered.add(unanswered.id)
 
 		// Only a camera that answered something is there to have failed to
-		// answer something else.
-		if (succeeded > 0) {
-			const failed = [
-				...(unanswered !== null ? [unanswered] : []),
-				...(!standby && this.#on === 'awake' ? refused : []),
-			]
-			for (const { id } of failed) {
-				const refusals = (this.#refusals.get(id) ?? 0) + 1
-				this.#refusals.set(id, refusals)
-				if (refusals < RefusalsBeforeUnsupported) continue
+		// answer something else.  One that ignored an inquiry answered the
+		// probe sent after it.
+		const failed = [
+			...ignored,
+			...(succeeded > 0 && unanswered !== null ? [unanswered] : []),
+			...(succeeded > 0 && !standby && this.#on === 'awake' ? refused : []),
+		]
+		for (const { id } of failed) {
+			const refusals = (this.#refusals.get(id) ?? 0) + 1
+			this.#refusals.set(id, refusals)
+			if (refusals < RefusalsBeforeUnsupported) continue
 
-				this.#unsupported.add(id)
-				this.#unanswered.delete(id)
-				this.#target.log('info', `Camera didn't answer the "${id}" status inquiry; no longer polling it`)
-			}
+			this.#unsupported.add(id)
+			this.#unanswered.delete(id)
+			this.#target.log('info', `Camera didn't answer the "${id}" status inquiry; no longer polling it`)
 		}
 
 		if (anyChanged) {
 			this.#target.setVariableValues(changed)
 		}
-		this.#target.passCompleted(succeeded > 0 || this.#inquiries.every(({ id }) => this.#unsupported.has(id)))
+		this.#target.passCompleted(
+			succeeded > 0 || ignored.length > 0 || this.#inquiries.every(({ id }) => this.#unsupported.has(id)),
+		)
 	}
 
 	#schedule(delay: number): void {

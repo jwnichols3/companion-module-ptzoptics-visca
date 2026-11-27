@@ -10,26 +10,28 @@ import { Cameras, inquiriesIgnored, recordedIn } from '../visca/__tests__/simula
 import { SimulatedCamera } from '../visca/__tests__/simulator/simulated-camera.js'
 import type { Bytes } from '../utils/byte.js'
 
-/** The interval between poll passes when the config doesn't give one. */
-const DefaultPollInterval = 1000
-
-/** How long the module gives the camera to answer a polled inquiry. */
-const InquiryTimeout = 3000
-
 /**
  * How many times in a row the module lets an inquiry go unanswered, while
  * the camera answers others, before it gives the inquiry up.
  */
 const TimesUnansweredBeforeGivenUp = 3
 
-/** A command is sent this often while the module finds out what the camera ignores. */
-const CommandEvery = 700
+/**
+ * A command is sent this often while the module finds out what the camera
+ * ignores: often enough that commands are pressed at every stage of the
+ * module's wait for an answer that doesn't come.
+ */
+const CommandEvery = 170
 
 /** The preset numbers the commands recall, in turn. */
 const Presets = 80
 
-/** What the module logs of a command whose acknowledgement it was waiting on when it took the connection for lost. */
-const AcknowledgementCutOff = 'Unhandled command rejection was suppressed: Error: Camera stopped answering'
+/**
+ * Longer than the module takes to give up on every inquiry the cameras
+ * captured so far ignore, and far shorter than it would take were each
+ * unanswered inquiry to cost a new connection.
+ */
+const GivenUpWithin = 15_000
 
 /** Longer than sixty poll passes take at the default interval. */
 const SixtyPasses = 90_000
@@ -56,20 +58,15 @@ const CamerasIgnoringInquiries = Cameras.flatMap((camera) =>
 )
 
 // Some cameras answer nothing at all to an inquiry they don't have, where
-// others refuse it.  The module can't tell an inquiry ignored from a camera
-// gone, so each time one goes unanswered it takes the connection for lost and
-// makes a new one.  With the Generic VISCA camera model it asks everything,
-// and finds out what the camera ignores only by asking.
+// others refuse it.  With the Generic VISCA camera model the module asks
+// everything, and finds out what the camera ignores only by asking.
 //
-// THIS IS WHAT THAT COSTS TODAY, NOT WHAT IT SHOULD COST.  Every inquiry the
-// camera ignores is asked `TimesUnansweredBeforeGivenUp` times, and each time
-// costs `InquiryTimeout` of waiting, a connection reported failed, and a
-// warning.  A camera that ignores five inquiries, as the cameras captured so
-// far do, takes fifteen reconnects and over a minute at the default poll
-// interval before the connection stays ok.  The module remembers what it gave
-// up on for as long as its settings are unchanged, so a connection lost and
-// made again later doesn't cost it again; a change of settings, or Companion
-// starting, does.
+// A camera that ignores an inquiry isn't gone.  When an inquiry isn't
+// answered promptly the module asks the camera something else, and an answer
+// to that shows the camera ignored the first: the connection is kept, and its
+// status never leaves ok.  An inquiry ignored `TimesUnansweredBeforeGivenUp`
+// times in a row is given up, with one line logged.  The module remembers
+// what it gave up on for as long as its settings are unchanged.
 
 describe.each(CamerasIgnoringInquiries)(
 	'camera ignores some inquiries, sending nothing in reply: $name',
@@ -85,14 +82,7 @@ describe.each(CamerasIgnoringInquiries)(
 
 		const ignored = replies.on.replies.filter(({ reply }) => reply === null).map(({ inquiry }) => inquiry)
 
-		/**
-		 * Longer than the module needs to give up on every inquiry the camera
-		 * ignores: for each time one is asked, a pass of slow answers, the
-		 * wait for the answer that doesn't come, and a new connection.
-		 */
-		const GivenUpWithin = TimesUnansweredBeforeGivenUp * ignored.length * (InquiryTimeout + 3 * DefaultPollInterval)
-
-		test('Generic VISCA: each is given up after three reconnects, no command is lost meanwhile, and polling is then quiet for good', async () => {
+		test('Generic VISCA: each is given up after going unanswered three times, the connection stays ok throughout, no command is lost meanwhile, and polling is then quiet for good', async () => {
 			// As slow to answer as the real camera was: one answer in each
 			// pass took it a third of a second.
 			const camera = await SimulatedCamera.start({ power: 'on', replies, latencyMs: 'recorded' })
@@ -117,45 +107,38 @@ describe.each(CamerasIgnoringInquiries)(
 			const commandsReceived = () => camera.received.filter(([, type]) => type === 0x01)
 
 			try {
-				// An operator goes on pressing buttons all the while: every
-				// so often, and at once each time the connection is reported
-				// failed, when the module is making a new one.
-				let failed = 0
+				// An operator goes on pressing buttons all the while.
 				for (let passed = 0; noLongerPolled(module).length < ignored.length; passed += 10) {
-					expect(passed, 'the module never gave up on the inquiries the camera ignores').toBeLessThan(GivenUpWithin)
+					expect(passed, 'the module took too long to give up on the inquiries the camera ignores').toBeLessThan(
+						GivenUpWithin,
+					)
 					await timePasses(10)
 
-					const failedNow = statusesFailed(module.statuses)
-					if (failedNow > failed || passed % CommandEvery === 0) {
-						failed = failedNow
+					if (passed % CommandEvery === 0) {
 						await recallPreset()
 					}
 				}
-				await eventually(() => {
-					expect(module.status).toBe(InstanceStatus.Ok)
-				})
 
-				// What it cost.
-				expect(statusesFailed(module.statuses)).toBe(TimesUnansweredBeforeGivenUp * ignored.length)
-				expect(logged(module, 'warn')).toEqual(
-					Array.from(
-						{ length: TimesUnansweredBeforeGivenUp * ignored.length },
-						() => `Camera didn't answer a status inquiry within ${InquiryTimeout} ms; reconnecting`,
-					),
-				)
+				// The connection never left ok, and no warning was logged.
+				expect(module.statuses).toEqual([InstanceStatus.Connecting, InstanceStatus.Ok])
+				expect(logged(module, 'warn')).toEqual([])
+				expect(camera.connectionsAccepted).toBe(1)
+
+				// Each inquiry the camera ignores was asked three times, and
+				// has one line saying it's no longer asked.
 				expect(timesReceived(camera, ignored)).toBe(TimesUnansweredBeforeGivenUp * ignored.length)
+				expect(new Set(noLongerPolled(module)).size).toBe(ignored.length)
+				expect(logged(module, 'info').filter((message) => message.includes('no longer polling'))).toHaveLength(
+					ignored.length,
+				)
 
-				// Every command reached the camera, once, in the order pressed.
+				// Every command reached the camera, once, in the order
+				// pressed, and none was reported failed.
 				await eventually(() => {
 					expect(commandsReceived()).toEqual(pressed)
 				})
 				expect(pressed.length).toBeGreaterThan(TimesUnansweredBeforeGivenUp * ignored.length)
-
-				// A command sent just as the module gives up on an inquiry
-				// is cut off from its acknowledgement by the new connection:
-				// the camera has it, but the module logs that it failed.
-				// Nothing else is logged as an error.
-				expect(logged(module, 'error').filter((message) => message !== AcknowledgementCutOff)).toEqual([])
+				expect(logged(module, 'error')).toEqual([])
 
 				// From here on polling is quiet: sixty passes and more with
 				// nothing ignored asked again, no status reported, and nothing
@@ -177,14 +160,14 @@ describe.each(CamerasIgnoringInquiries)(
 				// A connection lost and made again doesn't cost it all again.
 				camera.dropConnection()
 				await eventually(() => {
-					expect(statusesFailed(module.statuses)).toBe(TimesUnansweredBeforeGivenUp * ignored.length + 1)
+					expect(statusesFailed(module.statuses)).toBe(1)
 				})
 				await eventually(() => {
 					expect(module.status).toBe(InstanceStatus.Ok)
 				})
 				await timePasses(SixtyPasses)
 				expect(timesReceived(camera, ignored)).toBe(TimesUnansweredBeforeGivenUp * ignored.length)
-				expect(statusesFailed(module.statuses)).toBe(TimesUnansweredBeforeGivenUp * ignored.length + 1)
+				expect(statusesFailed(module.statuses)).toBe(1)
 				expect(noLongerPolled(module)).toHaveLength(ignored.length)
 
 				await module.executeAction(PowerActionId.CameraPowerState, { bool: 'on' })

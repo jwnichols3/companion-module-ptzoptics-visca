@@ -101,6 +101,14 @@ type WaitLogMessage = {
 	readonly regex: RegExp
 }
 
+type CommandsAreAcknowledged = {
+	readonly type: 'commands-acknowledged'
+}
+
+type CommandsAreNotAcknowledged = {
+	readonly type: 'commands-not-acknowledged'
+}
+
 /**
  * An interaction to perform during a camera interaction sequence test using
  * `RunCameraInteractionTest`.
@@ -122,6 +130,8 @@ export type Interaction =
 	| WaitForConnection
 	| CameraDisconnect
 	| WaitLogMessage
+	| CommandsAreAcknowledged
+	| CommandsAreNotAcknowledged
 
 /**
  * Send a command through the VISCA port.
@@ -373,4 +383,26 @@ export function CameraDisconnection(): CameraDisconnect {
  */
 export function WaitForLogMessage(regex: RegExp): WaitLogMessage {
 	return { type: 'wait-for-log-message', regex }
+}
+
+/**
+ * Expect the promise returned by the port's `commandsAcknowledged()` to
+ * resolve: both one requested now, and every one requested earlier by
+ * `CommandsNotAcknowledged`.
+ */
+export function CommandsAcknowledged(): CommandsAreAcknowledged {
+	return { type: 'commands-acknowledged' }
+}
+
+/**
+ * Expect the promise returned by the port's `commandsAcknowledged()` not to
+ * resolve yet, because a command sent through the port still awaits its
+ * initial response.
+ *
+ * Be careful to perform this only when no reply that would acknowledge the
+ * command can be on its way!  Otherwise the reply might be processed only
+ * after this expectation has been (vacuously) met.
+ */
+export function CommandsNotAcknowledged(): CommandsAreNotAcknowledged {
+	return { type: 'commands-not-acknowledged' }
 }

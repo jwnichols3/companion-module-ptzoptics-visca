@@ -299,6 +299,7 @@ async function verifyInteractions(
 	try {
 		const sentCommands: Map<string, Promise<void | Error>> = new Map()
 		const sentInquiries: { inquiry: Promise<Answer<AnswerParameters> | Error>; id: string }[] = []
+		const awaitingCommandsAcknowledged: Promise<void>[] = []
 
 		for (const interaction of interactions) {
 			LOG(`Processing ${interaction.type} interaction`)
@@ -529,6 +530,26 @@ async function verifyInteractions(
 				case 'wait-for-log-message': {
 					const { regex } = interaction
 					await instance.waitForLog(regex)
+					break
+				}
+				case 'commands-acknowledged': {
+					await clientViscaPort.commandsAcknowledged()
+					await Promise.all(awaitingCommandsAcknowledged.splice(0))
+					break
+				}
+				case 'commands-not-acknowledged': {
+					let acknowledged = false
+					awaitingCommandsAcknowledged.push(
+						clientViscaPort.commandsAcknowledged().then(() => {
+							acknowledged = true
+						}),
+					)
+					await new Promise<void>((resolve: () => void) => {
+						setImmediate(resolve)
+					})
+					if (acknowledged) {
+						throw new Error('Expected a command to await its initial response, but none does')
+					}
 					break
 				}
 				default:

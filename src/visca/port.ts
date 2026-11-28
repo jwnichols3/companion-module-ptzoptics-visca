@@ -914,11 +914,12 @@ export class VISCAPort {
 
 				const result = this.#findFirstInquiryWaitingForInitialResponse()
 				if (result === undefined) {
-					if (this.#ignoredAsUnsolicited('inquiry response', returnMessage)) {
-						continue
-					}
-
-					throw this.#errorWhileProcessingMessage('Received inquiry response without a pending inquiry', returnMessage)
+					// An inquiry response is never the response to a command,
+					// so with no inquiry pending it's the response to nothing
+					// even while commands await a response: ignore it, as
+					// `#ignoredAsUnsolicited` does, and leave them pending.
+					this.#instance.log('debug', `Ignoring unsolicited inquiry response ${prettyBytes(returnMessage)}`)
+					continue
 				}
 				const { i, pendingInquiry } = result
 

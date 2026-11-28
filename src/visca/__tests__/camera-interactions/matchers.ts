@@ -23,8 +23,6 @@ export const BadReturnNot90Matcher = /^Received return message not starting with
 export const UserDefinedInquiryMatcher = /Double-check the syntax of your inquiry./
 export const UserDefinedMessageMatcher = /Double-check the syntax of the message./
 
-export const InquiryResponseWithoutInquiryMatcher = /^Received inquiry response without a pending inquiry/
-
 export const ErrorOfUnexpectedLengthMatcher = /^Encountered error response of unexpected length/
 export const UnrecognizedErrorMatcher = /^Received error response to \[[0-9A-Z ]+\] with unrecognized format/
 

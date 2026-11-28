@@ -6,7 +6,6 @@ import {
 	CameraExpectIncomingBytes,
 	CameraReplyBytes,
 	CameraReplyNetworkChange,
-	CommandFailedFatally,
 	CommandSucceeded,
 	InquirySucceeded,
 	InstanceStatusIs,
@@ -15,7 +14,6 @@ import {
 	WaitForLogMessage,
 	WaitUntilConnectedToCamera,
 } from './camera-interactions/interactions.js'
-import { InquiryResponseWithoutInquiryMatcher, MatchVISCABytes } from './camera-interactions/matchers.js'
 import { RunCameraInteractionTest } from './camera-interactions/run-test.js'
 
 const IgnoringUnsolicitedMatcher = /^Ignoring unsolicited inquiry response /
@@ -67,6 +65,10 @@ describe('no pending inquiry', () => {
 		)
 	})
 
+	// An inquiry response is never the response to a command.  So while no
+	// inquiry is pending it's the response to nothing, whatever commands are
+	// pending, and they go on to be acknowledged and completed.
+
 	test('inquiry response with command waiting initial response', async () => {
 		const InquiryResponse = [0x90, 0x50, 0x37 /* makes it an inquiry response */, 0xff]
 		return RunCameraInteractionTest(
@@ -74,9 +76,13 @@ describe('no pending inquiry', () => {
 				SendCommand(FocusLock, 'focus-lock'),
 				CameraExpectIncomingBytes(FocusLockBytes), // focus-lock
 				CameraReplyBytes(InquiryResponse),
-				CommandFailedFatally([InquiryResponseWithoutInquiryMatcher, MatchVISCABytes(InquiryResponse)], 'focus-lock'),
+				WaitForLogMessage(IgnoringUnsolicitedMatcher),
+				InstanceStatusIs(InstanceStatus.Ok),
+				CameraReplyBytes(ACK(1)), // focus-lock
+				CameraReplyBytes(Completion(1)), // focus-lock
+				CommandSucceeded('focus-lock'),
 			],
-			InstanceStatus.ConnectionFailure,
+			InstanceStatus.Ok,
 		)
 	})
 
@@ -91,9 +97,13 @@ describe('no pending inquiry', () => {
 				CameraReplyBytes([0x90, 0x50, 0x02, 0xff]), // focus-mode
 				InquirySucceeded({ mode: 'auto' }, 'focus-mode'),
 				CameraReplyBytes(InquiryResponse),
-				CommandFailedFatally([InquiryResponseWithoutInquiryMatcher, MatchVISCABytes(InquiryResponse)], 'focus-lock'),
+				WaitForLogMessage(IgnoringUnsolicitedMatcher),
+				InstanceStatusIs(InstanceStatus.Ok),
+				CameraReplyBytes(ACK(1)), // focus-lock
+				CameraReplyBytes(Completion(1)), // focus-lock
+				CommandSucceeded('focus-lock'),
 			],
-			InstanceStatus.ConnectionFailure,
+			InstanceStatus.Ok,
 		)
 	})
 
@@ -106,9 +116,12 @@ describe('no pending inquiry', () => {
 				CameraReplyBytes(ACK(1)), // focus-lock
 				CameraReplyNetworkChange([0x90, 0x38, 0xff]), // not essential to this test: randomly added to tests
 				CameraReplyBytes(InquiryResponse),
-				CommandFailedFatally([InquiryResponseWithoutInquiryMatcher, MatchVISCABytes(InquiryResponse)], 'focus-lock'),
+				WaitForLogMessage(IgnoringUnsolicitedMatcher),
+				InstanceStatusIs(InstanceStatus.Ok),
+				CameraReplyBytes(Completion(1)), // focus-lock
+				CommandSucceeded('focus-lock'),
 			],
-			InstanceStatus.ConnectionFailure,
+			InstanceStatus.Ok,
 		)
 	})
 })

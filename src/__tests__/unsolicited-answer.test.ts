@@ -103,3 +103,90 @@ describeEachCamera('camera sends an answer nothing asked for, between poll passe
 		}
 	})
 })
+
+// An answer is never the response to a command.  So one that arrives while
+// no inquiry is unanswered is the answer to nothing, even if a command sent
+// meanwhile hasn't been acknowledged yet.  Taken for a sign that the module
+// and the camera had lost track of each other, it once closed the connection
+// for good, until someone disabled and enabled it.  The fault injection run
+// found this, from seed 1232023764: an answer sent too late, after the answer
+// to the probe sent after its inquiry, arrived just as a button was pressed.
+
+describeEachCamera(
+	'camera sends an answer nothing asked for, while a command awaits its acknowledgement',
+	['on', 'standby'],
+	({ replies: { on, standby } }) => {
+		// How a camera wakes is for other scenarios: this one is on as soon as
+		// it's told to be.
+		const replies = { on, standby }
+
+		const PowerStandbyBytes = [0x81, 0x01, 0x04, 0x00, 0x03, 0xff]
+
+		// Fake only the timers, not the sockets, so that the waits between
+		// poll passes take no real time, and the answer can be sent during
+		// one.
+		beforeEach(() => {
+			vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+		})
+		afterEach(() => {
+			vi.useRealTimers()
+		})
+
+		test('the answer is ignored: the command is carried out, the power variable follows, and the connection stays ok', async () => {
+			const camera = await SimulatedCamera.start({ power: 'on', replies })
+
+			// Every setting but these takes its default.
+			const module = await ModuleUnderTest.start({
+				host: '127.0.0.1',
+				port: String(camera.port),
+				pollEnabled: true,
+			})
+			try {
+				await eventually(() => {
+					expect(module.variable('power')).toBe('on')
+				})
+
+				// Well into the wait between two passes, every inquiry sent
+				// has been answered.
+				await timePasses(PollInterval / 2)
+				const receivedBefore = camera.received.length
+
+				// The camera has the command, and hasn't acknowledged it,
+				// when it sends the answer.
+				camera.hold()
+				await module.executeAction(PowerActionId.CameraPowerState, { bool: 'off' })
+				await eventually(() => {
+					expect(camera.received.length).toBeGreaterThan(receivedBefore)
+				})
+				expect(camera.received.slice(receivedBefore)).toEqual([PowerStandbyBytes])
+				camera.send(StrayAnswer)
+				await eventually(() => {
+					expect(errorsLogged(module)).toEqual([])
+					expect(module.logs).toContainEqual({
+						level: 'debug',
+						message: 'Ignoring unsolicited inquiry response [90 50 03 FF]',
+					})
+				})
+				expect(module.variable('power')).toBe('on')
+				camera.release()
+
+				await eventually(() => {
+					expect(camera.power).toBe('standby')
+					expect(module.variable('power')).toBe('standby')
+				})
+
+				// And values go on following the camera.
+				await module.executeAction(PowerActionId.CameraPowerState, { bool: 'on' })
+				await eventually(() => {
+					expect(camera.power).toBe('on')
+					expect(module.variable('power')).toBe('on')
+				})
+				expect(module.statuses).toEqual([InstanceStatus.Connecting, InstanceStatus.Ok])
+				expect(errorsLogged(module)).toEqual([])
+			} finally {
+				await module.destroy()
+				await camera.stop()
+			}
+		})
+	},
+)

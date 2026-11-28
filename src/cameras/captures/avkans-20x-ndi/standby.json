@@ -1,103 +1,103 @@
 {
 	"camera": {
 		"brand": "AVKANS",
-		"model": "unknown",
+		"model": "NDI Camera with 20X Zoom 3G-SDI HDMI USB",
 		"firmware": null,
 		"versionReply": "90 50 00 0D 05 01 01 00 01 FF"
 	},
-	"state": "on",
-	"capturedAt": "2026-11-27",
+	"state": "standby",
+	"capturedAt": "2026-11-28",
 	"scriptVersion": 1,
 	"exchanges": [
 		{
 			"name": "power",
 			"sent": "81 09 04 00 FF",
-			"received": "90 50 02 FF",
-			"ms": 12
+			"received": "90 50 03 FF",
+			"ms": 11
 		},
 		{
 			"name": "pan-tilt",
 			"sent": "81 09 06 12 FF",
-			"received": "90 50 0F 0F 09 08 0F 0F 09 08 FF",
+			"received": "90 61 41 FF",
 			"ms": 16
 		},
 		{
 			"name": "zoom",
 			"sent": "81 09 04 47 FF",
-			"received": "90 50 01 05 09 00 FF",
-			"ms": 17
+			"received": "90 61 41 FF",
+			"ms": 11
 		},
 		{
 			"name": "focus",
 			"sent": "81 09 04 48 FF",
-			"received": "90 50 03 04 08 0C FF",
-			"ms": 15
+			"received": "90 61 41 FF",
+			"ms": 13
 		},
 		{
 			"name": "focus-mode",
 			"sent": "81 09 04 38 FF",
-			"received": "90 50 03 FF",
-			"ms": 14
+			"received": "90 61 41 FF",
+			"ms": 20
 		},
 		{
 			"name": "exposure-mode",
 			"sent": "81 09 04 39 FF",
-			"received": "90 50 03 FF",
+			"received": "90 61 41 FF",
 			"ms": 12
 		},
 		{
 			"name": "iris",
 			"sent": "81 09 04 4B FF",
-			"received": "90 50 00 00 00 0A FF",
-			"ms": 17
+			"received": "90 61 41 FF",
+			"ms": 15
 		},
 		{
 			"name": "shutter",
 			"sent": "81 09 04 4A FF",
-			"received": "90 50 00 00 00 07 FF",
-			"ms": 16
+			"received": "90 61 41 FF",
+			"ms": 14
 		},
 		{
 			"name": "gain",
 			"sent": "81 09 04 4C FF",
-			"received": "90 50 00 00 00 00 FF",
+			"received": "90 61 41 FF",
 			"ms": 13
 		},
 		{
 			"name": "brightness",
 			"sent": "81 09 04 4D FF",
-			"received": "90 50 00 00 01 01 FF",
-			"ms": 350
+			"received": "90 61 41 FF",
+			"ms": 16
 		},
 		{
 			"name": "wb-mode",
 			"sent": "81 09 04 35 FF",
-			"received": "90 50 05 FF",
-			"ms": 35
+			"received": "90 61 41 FF",
+			"ms": 350
 		},
 		{
 			"name": "wb-red",
 			"sent": "81 09 04 43 FF",
-			"received": "90 50 00 00 05 0B FF",
-			"ms": 29
+			"received": "90 61 41 FF",
+			"ms": 13
 		},
 		{
 			"name": "wb-blue",
 			"sent": "81 09 04 44 FF",
-			"received": "90 50 00 00 0A 0A FF",
-			"ms": 33
+			"received": "90 61 41 FF",
+			"ms": 10
 		},
 		{
 			"name": "flip",
 			"sent": "81 09 04 66 FF",
-			"received": "90 50 03 FF",
-			"ms": 33
+			"received": "90 61 41 FF",
+			"ms": 16
 		},
 		{
 			"name": "mirror",
 			"sent": "81 09 04 61 FF",
-			"received": "90 50 03 FF",
-			"ms": 35
+			"received": "90 61 41 FF",
+			"ms": 13
 		},
 		{
 			"name": "color-temperature",
@@ -120,14 +120,14 @@
 		{
 			"name": "saturation",
 			"sent": "81 09 04 49 FF",
-			"received": "90 50 00 00 00 07 FF",
-			"ms": 13
+			"received": "90 61 41 FF",
+			"ms": 16
 		},
 		{
 			"name": "hue",
 			"sent": "81 09 04 4F FF",
-			"received": "90 50 00 00 00 07 FF",
-			"ms": 19
+			"received": "90 61 41 FF",
+			"ms": 29
 		},
 		{
 			"name": "contrast",
@@ -144,14 +144,14 @@
 		{
 			"name": "sharpness",
 			"sent": "81 09 04 42 FF",
-			"received": "90 50 00 00 00 05 FF",
-			"ms": 21
+			"received": "90 61 41 FF",
+			"ms": 13
 		},
 		{
 			"name": "exposure-compensation",
 			"sent": "81 09 04 4E FF",
-			"received": "90 50 00 00 00 07 FF",
-			"ms": 14
+			"received": "90 61 41 FF",
+			"ms": 12
 		}
 	]
 }

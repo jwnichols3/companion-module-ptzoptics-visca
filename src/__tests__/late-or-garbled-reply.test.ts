@@ -21,6 +21,17 @@ function errorsLogged(module: ModuleUnderTest): string[] {
 	return module.logs.filter(({ level }) => level === 'error').map(({ message }) => message)
 }
 
+/**
+ * Wait until the focus mode has been polled, and return it.  A camera's focus
+ * mode is whichever it was in when it was recorded.
+ */
+async function focusModePolled(module: ModuleUnderTest): Promise<string> {
+	await eventually(() => {
+		expect(module.variable('focus_mode')).toMatch(/^(auto|manual)$/)
+	})
+	return module.variable('focus_mode') as string
+}
+
 describeEachCamera(
 	'a reply from the camera arrives late or garbled',
 	['on', 'standby'],
@@ -193,9 +204,7 @@ describeEachCamera(
 				pollGroups: ['power', 'position', 'lens'],
 			})
 			try {
-				await eventually(() => {
-					expect(module.variable('focus_mode')).toBe('auto')
-				})
+				const focusMode = await focusModePolled(module)
 
 				const garbledAt = camera.received.length
 				camera.replyGarbled([0x90, 0x50, 0x7f, 0x7f, 0x7f, 0xff])
@@ -210,7 +219,7 @@ describeEachCamera(
 
 				// The garbled reply wasn't mistaken for a value.
 				expect(module.variable('power')).toBe('on')
-				expect(module.variable('focus_mode')).toBe('auto')
+				expect(module.variable('focus_mode')).toBe(focusMode)
 
 				await module.executeAction(PowerActionId.CameraPowerState, { bool: 'on' })
 				await eventually(() => {
@@ -237,9 +246,7 @@ describeEachCamera(
 				pollGroups: ['power', 'position', 'lens'],
 			})
 			try {
-				await eventually(() => {
-					expect(module.variable('focus_mode')).toBe('auto')
-				})
+				await focusModePolled(module)
 
 				const garbledAt = camera.received.length
 				camera.replyGarbled([0x90, 0x50, 0x7f, 0x7f, 0x7f, 0xff])
@@ -269,9 +276,7 @@ describeEachCamera(
 				pollGroups: ['power', 'position', 'lens'],
 			})
 			try {
-				await eventually(() => {
-					expect(module.variable('focus_mode')).toBe('auto')
-				})
+				await focusModePolled(module)
 
 				const garbledAt = camera.received.length
 				camera.replyGarbled([0x90, 0x50, 0x02])

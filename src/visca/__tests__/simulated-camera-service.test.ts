@@ -19,7 +19,7 @@ const ACKCompletion = [0x90, 0x41, 0xff, 0x90, 0x51, 0xff]
 const Camera = 'refuses-inquiries-in-standby'
 
 /** A camera recorded only while on, which left some inquiries unanswered. */
-const CameraRecordedOn = 'avkans-unidentified-a'
+const CameraRecordedOn = 'avkans-unidentified-b'
 
 /** A camera recorded only while in standby. */
 const CameraRecordedInStandby = 'avkans-unidentified'
